@@ -102,7 +102,7 @@ graph TD
 ## Developer Quick Start
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -112,6 +112,7 @@ Open `http://localhost:3000` in your browser.
 
 ```bash
 npm run lint                 # Strict TypeScript type-checking (tsc -p tsconfig.json --noEmit)
+npm run test:unit            # Fast deterministic unit tests (ProgressionService & ColliderMath)
 npm run build                # Production bundle compilation into dist/
 npm run test:game            # End-to-end Playwright suite (scripts/test-capygame.mjs)
 npm run test:pwa             # Offline Service Worker & PWA manifest verification
