@@ -98,6 +98,15 @@ import {
   clampToContiguousWalkableWorld,
   sampleContiguousGroundY,
 } from './physics/ContiguousWorldTopology';
+import {
+  GhostPoseScratch,
+  QuantizedGhostRun,
+  YuzuGhostRecorder,
+  createGhostPoseScratch,
+  loadBestYuzuGhostRun,
+  sampleGhostRunAtTime,
+  saveBestYuzuGhostRunIfFaster,
+} from './physics/YuzuGhostRecorder';
 import type {
   PhysicsEngineTelemetry,
   StaticBoxColliderSpec,
@@ -646,6 +655,13 @@ export class PlayStyleManager {
     laneOffset: number;
     vy: number;
   }> = [];
+  private yuzuGhostRecorder = new YuzuGhostRecorder();
+  private yuzuBestGhostRun: QuantizedGhostRun | null = loadBestYuzuGhostRun();
+  private readonly yuzuGhostPoseScratch: GhostPoseScratch = createGhostPoseScratch();
+  private yuzuGhostRunActive: boolean = false;
+  private yuzuGhostRunElapsedSec: number = 0;
+  private fallGuysGhostCapy: CapyMeshGroup | null = null;
+  private fallGuysGhostMat: THREE.MeshStandardMaterial | null = null;
 
   constructor(
     container: HTMLElement,
@@ -4175,6 +4191,35 @@ export class PlayStyleManager {
           vy: 0,
         });
       }
+
+      // Translucent Personal-Best Ghost Capybara (zero per-frame allocations)
+      const ghostCapy = CapyModelGenerator.createCapybara('crown', 0.94, 'cosmic');
+      const ghostMat = new THREE.MeshStandardMaterial({
+        color: 0x67e8f9,
+        emissive: 0x06b6d4,
+        emissiveIntensity: 0.72,
+        roughness: 0.24,
+        metalness: 0.15,
+        transparent: true,
+        opacity: 0.44,
+        depthWrite: false,
+      });
+      ghostCapy.userData.ignoreCameraFade = true;
+      ghostCapy.userData.furInstancedMesh.visible = false;
+      ghostCapy.userData.rearFurInstancedMesh.visible = false;
+      ghostCapy.traverse((obj) => {
+        obj.userData.ignoreCameraFade = true;
+        const m = obj as THREE.Mesh;
+        if (m.isMesh && !(m as THREE.InstancedMesh).isInstancedMesh) {
+          m.material = ghostMat;
+          m.castShadow = false;
+          m.receiveShadow = false;
+        }
+      });
+      ghostCapy.visible = false;
+      this.fallGuysGroup.add(ghostCapy);
+      this.fallGuysGhostCapy = ghostCapy;
+      this.fallGuysGhostMat = ghostMat;
     }
 
     // In-place round reset (zero geometry/material allocations!)
@@ -4192,7 +4237,57 @@ export class PlayStyleManager {
       rival.speed = 5.8 + this.proceduralPrng() * 2.4;
       rival.capy.visible = i < fCfg.rivalCount;
     }
+    this.yuzuGhostRunActive = false;
+    this.yuzuGhostRunElapsedSec = 0;
+    this.yuzuGhostRecorder.stopRun();
+    this.syncGhostToStartPose();
     this.physicsBridge?.resetSeeSaw();
+  }
+
+  private syncGhostToStartPose(): void {
+    if (!this.fallGuysGhostCapy) return;
+    if (
+      this.yuzuBestGhostRun &&
+      sampleGhostRunAtTime(this.yuzuBestGhostRun, 0, this.yuzuGhostPoseScratch)
+    ) {
+      this.fallGuysGhostCapy.position.set(
+        this.yuzuGhostPoseScratch.x,
+        this.yuzuGhostPoseScratch.y,
+        this.yuzuGhostPoseScratch.z
+      );
+      this.fallGuysGhostCapy.rotation.set(0, this.yuzuGhostPoseScratch.yaw, 0);
+      this.resetCapyLegs(this.fallGuysGhostCapy, 0.016);
+      this.fallGuysGhostCapy.visible = true;
+    } else {
+      this.fallGuysGhostCapy.visible = false;
+    }
+  }
+
+  public reloadYuzuBestGhostFromStorage(): void {
+    this.yuzuBestGhostRun = loadBestYuzuGhostRun();
+    if (!this.yuzuGhostRunActive) {
+      this.syncGhostToStartPose();
+    }
+  }
+
+  public getYuzuGhostStatus(): {
+    hasPersonalBest: boolean;
+    bestTimeSec: number | null;
+    bestFrameCount: number;
+    runActive: boolean;
+    runElapsedSec: number;
+    ghostVisible: boolean;
+  } {
+    return {
+      hasPersonalBest: Boolean(this.yuzuBestGhostRun),
+      bestTimeSec: this.yuzuBestGhostRun
+        ? +(this.yuzuBestGhostRun.durationMs / 1000).toFixed(2)
+        : null,
+      bestFrameCount: this.yuzuBestGhostRun?.frameCount ?? 0,
+      runActive: this.yuzuGhostRunActive,
+      runElapsedSec: +this.yuzuGhostRunElapsedSec.toFixed(2),
+      ghostVisible: Boolean(this.fallGuysGhostCapy?.visible),
+    };
   }
 
   // ============================================================================
@@ -6429,12 +6524,18 @@ export class PlayStyleManager {
         zoneCoordsLabel: coords,
       });
     } else if (this.currentMode === 'fallguys') {
+      const pbLabel = this.yuzuBestGhostRun
+        ? ` · PB ${(this.yuzuBestGhostRun.durationMs / 1000).toFixed(2)}s`
+        : '';
+      const runLabel = this.yuzuGhostRunActive
+        ? `R${this.fallGuysRound} · ${this.yuzuGhostRunElapsedSec.toFixed(1)}s${pbLabel}`
+        : `Round ${this.fallGuysRound}${pbLabel}`;
       this.callbacks.onTelemetryUpdate({
         mode: 'fallguys',
         primaryLabel: 'Crowns Won',
         primaryValue: this.fallGuysCrowns,
-        secondaryLabel: 'Course Round',
-        secondaryValue: `Round ${this.fallGuysRound}`,
+        secondaryLabel: this.yuzuBestGhostRun ? 'Run / Ghost PB' : 'Course Round',
+        secondaryValue: runLabel,
         zoneCoordsLabel: coords,
       });
     }
@@ -8709,8 +8810,80 @@ export class PlayStyleManager {
       }
     }
 
+    // Deterministic Input & Transform Ghost Racing on Yuzu Mountain
+    if (!this.yuzuGhostRunActive && this.heroLocalPos.z <= -1.0 && this.heroLocalPos.z > -55.0) {
+      this.yuzuGhostRunActive = true;
+      this.yuzuGhostRunElapsedSec = 0;
+      this.yuzuGhostRecorder.startRun();
+    } else if (this.yuzuGhostRunActive && this.heroLocalPos.z > 2.5) {
+      this.yuzuGhostRunActive = false;
+      this.yuzuGhostRunElapsedSec = 0;
+      this.yuzuGhostRecorder.stopRun();
+      this.syncGhostToStartPose();
+    }
+
+    if (this.yuzuGhostRunActive) {
+      this.yuzuGhostRunElapsedSec += dt;
+      const planarVel = Math.hypot(this.heroVelocity.x, this.heroVelocity.z);
+      this.yuzuGhostRecorder.recordTick(
+        this.yuzuGhostRunElapsedSec,
+        this.heroLocalPos.x,
+        this.heroLocalPos.y,
+        this.heroLocalPos.z,
+        this.heroYaw,
+        this.moveInput.x,
+        this.moveInput.z,
+        this.isGrounded,
+        planarVel > 0.4,
+        !this.isGrounded
+      );
+
+      if (
+        this.yuzuBestGhostRun &&
+        this.fallGuysGhostCapy &&
+        sampleGhostRunAtTime(
+          this.yuzuBestGhostRun,
+          this.yuzuGhostRunElapsedSec,
+          this.yuzuGhostPoseScratch
+        )
+      ) {
+        this.fallGuysGhostCapy.visible = true;
+        this.fallGuysGhostCapy.position.set(
+          this.yuzuGhostPoseScratch.x,
+          this.yuzuGhostPoseScratch.y,
+          this.yuzuGhostPoseScratch.z
+        );
+        this.fallGuysGhostCapy.rotation.set(0, this.yuzuGhostPoseScratch.yaw, 0);
+        if (this.yuzuGhostPoseScratch.moving && !this.yuzuGhostPoseScratch.finished) {
+          this.animateCapyLegs(this.fallGuysGhostCapy, dt, 14);
+        } else {
+          this.resetCapyLegs(this.fallGuysGhostCapy, dt);
+        }
+      }
+    }
+
     // Check Golden Crown Finish Line at Z <= -57 & |X| <= 4.5
     if (this.heroLocalPos.z <= -57 && Math.abs(this.heroLocalPos.x) <= 4.5) {
+      let ghostFinishNote = '';
+      if (this.yuzuGhostRunActive) {
+        const finishedRun = this.yuzuGhostRecorder.finalizeRun(
+          this.yuzuGhostRunElapsedSec * 1000,
+          this.heroLocalPos.x,
+          this.heroLocalPos.y,
+          this.heroLocalPos.z,
+          this.heroYaw
+        );
+        if (finishedRun) {
+          const savedRes = saveBestYuzuGhostRunIfFaster(finishedRun);
+          this.yuzuBestGhostRun = savedRes.bestRun;
+          const runSec = (finishedRun.durationMs / 1000).toFixed(2);
+          const pbSec = (savedRes.bestRun.durationMs / 1000).toFixed(2);
+          ghostFinishNote = savedRes.saved
+            ? ` in ${runSec}s (NEW GHOST PB!)`
+            : ` in ${runSec}s (Ghost PB: ${pbSec}s)`;
+        }
+      }
+
       this.fallGuysCrowns++;
       this.fallGuysRound++;
       AudioService.playPrestigeFanfare();
@@ -8720,7 +8893,7 @@ export class PlayStyleManager {
       );
       this.awardProgress(crownDna, 'fallguys', this.fallGuysCrowns);
       this.callbacks.onModeNotification?.(
-        `GOLDEN CROWN #${this.fallGuysCrowns} CLAIMED! Advancing to Round ${this.fallGuysRound}!`
+        `GOLDEN CROWN #${this.fallGuysCrowns} CLAIMED${ghostFinishNote}! Advancing to Round ${this.fallGuysRound}!`
       );
       this.heroLocalPos.set(0, 1.0, 0);
       this.heroYaw = Math.PI;
@@ -9562,6 +9735,7 @@ export class PlayStyleManager {
     this.sporeWaterMat?.dispose();
     this.sharedBreakoutPowerupGeo.dispose();
     this.sharedBreakoutPowerupMat.dispose();
+    this.fallGuysGhostMat?.dispose();
     disposeObject3DTree(this.scene);
     this.renderer.domElement.remove();
     this.renderer.dispose();

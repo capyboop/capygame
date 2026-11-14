@@ -16,10 +16,60 @@ import {
   SPORE_MUTATIONS,
   WorldBuilding,
 } from '../types';
+import {
+  QuantizedGhostRun,
+  loadBestYuzuGhostRun,
+  parseAndValidateGhostRun,
+  saveYuzuGhostRunDirect,
+} from '../engine/physics/YuzuGhostRecorder';
 
 const SAVE_KEY = 'capy_game_save_v3';
 const LEGACY_SAVE_KEY_V2 = 'capy_game_save_v2';
 const SETTINGS_KEY = 'capy_game_settings_v1';
+
+const VALID_PLAY_STYLES: ReadonlySet<PlayStyle> = new Set([
+  'sanctuary',
+  'spore',
+  'breakout',
+  'runner',
+  'fallguys',
+]);
+
+const VALID_BUILDING_TYPES: ReadonlySet<BuildingType> = new Set([
+  'hot_spring',
+  'yuzu_orchard',
+  'bamboo_grove',
+  'zen_pagoda',
+  'capy_statue',
+  'trampoline_pad',
+]);
+
+const VALID_MUTATION_IDS: ReadonlySet<MutationId> = new Set(
+  SPORE_MUTATIONS.map((m) => m.id)
+);
+
+export interface CapySaveBundle {
+  schema: 'capygame-save-bundle-v1';
+  exportedAtIso: string;
+  saveKey: typeof SAVE_KEY;
+  settingsKey: typeof SETTINGS_KEY;
+  stats: PlayerStats;
+  settings: CapyGameSettings;
+  yuzuGhostRun?: QuantizedGhostRun | null;
+}
+
+export type SaveBundleImportResult =
+  | {
+      ok: true;
+      stats: PlayerStats;
+      settings: CapyGameSettings;
+      yuzuGhostRun: QuantizedGhostRun | null;
+      warnings: string[];
+    }
+  | {
+      ok: false;
+      error: string;
+    };
 
 export class ProgressionService {
   private static cachedStats: PlayerStats | null = null;
@@ -42,6 +92,303 @@ export class ProgressionService {
     }
   }
 
+  public static sanitizePlayerStats(raw: unknown, warnings?: string[]): PlayerStats {
+    if (!raw || typeof raw !== 'object') {
+      warnings?.push('Missing stats object; using initial defaults.');
+      return structuredClone(INITIAL_PLAYER_STATS);
+    }
+    const parsed = raw as Partial<PlayerStats> & Record<string, unknown>;
+    const cleanNum = (val: unknown, fallback: number, min = 0): number => {
+      if (typeof val === 'number' && Number.isFinite(val)) {
+        return Math.max(min, Math.round(val));
+      }
+      return fallback;
+    };
+
+    const rawActiveMutations = Array.isArray(parsed.activeMutations)
+      ? parsed.activeMutations.filter(
+          (id): id is MutationId => typeof id === 'string' && VALID_MUTATION_IDS.has(id as MutationId)
+        )
+      : [];
+    const rawUnlockedMutations = Array.isArray(parsed.unlockedMutations)
+      ? parsed.unlockedMutations.filter(
+          (id): id is MutationId => typeof id === 'string' && VALID_MUTATION_IDS.has(id as MutationId)
+        )
+      : [...rawActiveMutations];
+    for (const activeId of rawActiveMutations) {
+      if (!rawUnlockedMutations.includes(activeId)) {
+        rawUnlockedMutations.push(activeId);
+      }
+    }
+
+    const rawBuildings = Array.isArray(parsed.buildings)
+      ? parsed.buildings
+          .filter((b): b is WorldBuilding => {
+            if (!b || typeof b !== 'object') return false;
+            const candidate = b as Partial<WorldBuilding>;
+            return (
+              typeof candidate.type === 'string' &&
+              VALID_BUILDING_TYPES.has(candidate.type as BuildingType) &&
+              typeof candidate.x === 'number' &&
+              Number.isFinite(candidate.x) &&
+              typeof candidate.z === 'number' &&
+              Number.isFinite(candidate.z)
+            );
+          })
+          .map((b, idx) => ({
+            id:
+              typeof b.id === 'string' && b.id.trim().length > 0
+                ? b.id
+                : `b_imp_${idx}_${Date.now()}`,
+            type: b.type,
+            name:
+              typeof b.name === 'string' && b.name.trim().length > 0
+                ? b.name
+                : BUILDING_CATALOG.find((item) => item.type === b.type)?.name ?? b.type,
+            level: cleanNum(b.level, 1, 1),
+            x: Math.max(-45, Math.min(45, b.x)),
+            z: Math.max(-45, Math.min(45, b.z)),
+            description:
+              typeof b.description === 'string'
+                ? b.description
+                : BUILDING_CATALOG.find((item) => item.type === b.type)?.description ?? '',
+          }))
+      : [];
+
+    const rawCosmetics = Array.isArray(parsed.unlockedCosmetics)
+      ? parsed.unlockedCosmetics.filter((c): c is string => typeof c === 'string' && c.length > 0)
+      : [];
+    const unlockedCosmetics =
+      rawCosmetics.length > 0 ? Array.from(new Set(rawCosmetics)) : [...INITIAL_PLAYER_STATS.unlockedCosmetics];
+
+    const selectedPlayStyle: PlayStyle =
+      typeof parsed.selectedPlayStyle === 'string' &&
+      VALID_PLAY_STYLES.has(parsed.selectedPlayStyle as PlayStyle)
+        ? (parsed.selectedPlayStyle as PlayStyle)
+        : INITIAL_PLAYER_STATS.selectedPlayStyle;
+
+    const rawUpgrades =
+      parsed.upgrades && typeof parsed.upgrades === 'object'
+        ? (parsed.upgrades as Partial<PlayerStats['upgrades']>)
+        : {};
+
+    return {
+      ...INITIAL_PLAYER_STATS,
+      dna: cleanNum(parsed.dna, INITIAL_PLAYER_STATS.dna, 0),
+      coins: cleanNum(parsed.coins, INITIAL_PLAYER_STATS.coins, 0),
+      prestigeLevel: cleanNum(parsed.prestigeLevel, INITIAL_PLAYER_STATS.prestigeLevel, 1),
+      selectedPlayStyle,
+      activeHat:
+        typeof parsed.activeHat === 'string' && parsed.activeHat.length > 0
+          ? parsed.activeHat
+          : INITIAL_PLAYER_STATS.activeHat,
+      activeSkin:
+        typeof parsed.activeSkin === 'string' && parsed.activeSkin.length > 0
+          ? parsed.activeSkin
+          : INITIAL_PLAYER_STATS.activeSkin,
+      activeMutations: Array.from(new Set(rawActiveMutations)),
+      unlockedMutations: Array.from(new Set(rawUnlockedMutations)),
+      evolutionStage: cleanNum(parsed.evolutionStage, 1, 1),
+      highScoreSpore: cleanNum(parsed.highScoreSpore, 0, 0),
+      highScoreBreakout: cleanNum(parsed.highScoreBreakout, 0, 0),
+      highScoreRunner: cleanNum(parsed.highScoreRunner, 0, 0),
+      highScoreFallGuys: cleanNum(parsed.highScoreFallGuys, 0, 0),
+      upgrades: {
+        herdSize: cleanNum(rawUpgrades.herdSize, INITIAL_PLAYER_STATS.upgrades.herdSize, 1),
+        yuzuMagnet: cleanNum(rawUpgrades.yuzuMagnet, INITIAL_PLAYER_STATS.upgrades.yuzuMagnet, 1),
+        speedBoost: cleanNum(rawUpgrades.speedBoost, INITIAL_PLAYER_STATS.upgrades.speedBoost, 1),
+        paddleSize: cleanNum(rawUpgrades.paddleSize, INITIAL_PLAYER_STATS.upgrades.paddleSize, 1),
+        bounciness: cleanNum(rawUpgrades.bounciness, INITIAL_PLAYER_STATS.upgrades.bounciness, 1),
+      },
+      buildings:
+        rawBuildings.length > 0 ? rawBuildings : structuredClone(INITIAL_PLAYER_STATS.buildings),
+      unlockedCosmetics,
+      unlockedObjectMarkers: Boolean(parsed.unlockedObjectMarkers),
+      unlockedRealityRescaler: Boolean(parsed.unlockedRealityRescaler),
+    };
+  }
+
+  public static sanitizeGameSettings(raw: unknown, warnings?: string[]): CapyGameSettings {
+    if (!raw || typeof raw !== 'object') {
+      warnings?.push('Missing settings object; using default simulation settings.');
+      return { ...DEFAULT_CAPY_SETTINGS };
+    }
+    const parsed = raw as Partial<CapyGameSettings>;
+    return {
+      ...DEFAULT_CAPY_SETTINGS,
+      ...parsed,
+      worldFogEnabled: false,
+      drawDistance:
+        typeof parsed.drawDistance === 'number' && Number.isFinite(parsed.drawDistance)
+          ? Math.max(90, Math.min(1350, Math.round(parsed.drawDistance)))
+          : parsed.gpuQualityPreset === 'performance'
+            ? 135
+            : DEFAULT_CAPY_SETTINGS.drawDistance,
+      realityScaleGamma:
+        typeof parsed.realityScaleGamma === 'number' &&
+        Number.isFinite(parsed.realityScaleGamma)
+          ? Math.max(0.28, Math.min(1.0, parsed.realityScaleGamma))
+          : DEFAULT_CAPY_SETTINGS.realityScaleGamma,
+      showObjectMarkers: Boolean(parsed.showObjectMarkers),
+      astrophysicsPalette:
+        parsed.astrophysicsPalette === 'hubble' ? 'hubble' : 'natural',
+      cameraDistance:
+        typeof parsed.cameraDistance === 'number' && Number.isFinite(parsed.cameraDistance)
+          ? Math.max(0.6, Math.min(1.5, parsed.cameraDistance))
+          : DEFAULT_CAPY_SETTINGS.cameraDistance,
+      turnSensitivity:
+        typeof parsed.turnSensitivity === 'number' && Number.isFinite(parsed.turnSensitivity)
+          ? Math.max(0.5, Math.min(2.0, parsed.turnSensitivity))
+          : DEFAULT_CAPY_SETTINGS.turnSensitivity,
+      fov:
+        typeof parsed.fov === 'number' && Number.isFinite(parsed.fov)
+          ? Math.max(45, Math.min(75, Math.round(parsed.fov)))
+          : DEFAULT_CAPY_SETTINGS.fov,
+      timeOfDayHours:
+        typeof parsed.timeOfDayHours === 'number' && Number.isFinite(parsed.timeOfDayHours)
+          ? Math.max(0, Math.min(24, parsed.timeOfDayHours))
+          : DEFAULT_CAPY_SETTINGS.timeOfDayHours,
+      gpuExposure:
+        typeof parsed.gpuExposure === 'number' && Number.isFinite(parsed.gpuExposure)
+          ? Math.max(0.5, Math.min(2.0, parsed.gpuExposure))
+          : DEFAULT_CAPY_SETTINGS.gpuExposure,
+      gpuBloomStrength:
+        typeof parsed.gpuBloomStrength === 'number' &&
+        Number.isFinite(parsed.gpuBloomStrength)
+          ? Math.max(0.0, Math.min(1.5, parsed.gpuBloomStrength))
+          : DEFAULT_CAPY_SETTINGS.gpuBloomStrength,
+      gpuSharpenAmount:
+        typeof parsed.gpuSharpenAmount === 'number' &&
+        Number.isFinite(parsed.gpuSharpenAmount)
+          ? Math.max(0.0, Math.min(1.0, parsed.gpuSharpenAmount))
+          : DEFAULT_CAPY_SETTINGS.gpuSharpenAmount,
+      maxFpsLimit:
+        typeof parsed.maxFpsLimit === 'number' && Number.isFinite(parsed.maxFpsLimit)
+          ? parsed.maxFpsLimit <= 0
+            ? 0
+            : Math.max(24, Math.min(240, Math.round(parsed.maxFpsLimit)))
+          : DEFAULT_CAPY_SETTINGS.maxFpsLimit,
+      fpsTarget:
+        typeof parsed.fpsTarget === 'number' && Number.isFinite(parsed.fpsTarget)
+          ? Math.max(24, Math.min(240, Math.round(parsed.fpsTarget)))
+          : DEFAULT_CAPY_SETTINGS.fpsTarget,
+      showFpsButton:
+        parsed.showFpsButton === undefined
+          ? DEFAULT_CAPY_SETTINGS.showFpsButton
+          : Boolean(parsed.showFpsButton),
+      mouselookEnabled:
+        parsed.mouselookEnabled === undefined
+          ? DEFAULT_CAPY_SETTINGS.mouselookEnabled
+          : Boolean(parsed.mouselookEnabled),
+      mouselookSensitivity:
+        typeof parsed.mouselookSensitivity === 'number' &&
+        Number.isFinite(parsed.mouselookSensitivity)
+          ? Math.max(0.2, Math.min(2.5, Math.round(parsed.mouselookSensitivity * 20) / 20))
+          : DEFAULT_CAPY_SETTINGS.mouselookSensitivity,
+      invertMouseY:
+        parsed.invertMouseY === undefined
+          ? DEFAULT_CAPY_SETTINGS.invertMouseY
+          : Boolean(parsed.invertMouseY),
+      gpuResolutionScale:
+        typeof parsed.gpuResolutionScale === 'number' &&
+        Number.isFinite(parsed.gpuResolutionScale)
+          ? Math.max(0.5, Math.min(1.5, parsed.gpuResolutionScale))
+          : DEFAULT_CAPY_SETTINGS.gpuResolutionScale,
+      gpuAntiAliasing:
+        parsed.gpuAntiAliasing === 'msaa_fxaa' ||
+        parsed.gpuAntiAliasing === 'fxaa' ||
+        parsed.gpuAntiAliasing === 'none'
+          ? parsed.gpuAntiAliasing
+          : DEFAULT_CAPY_SETTINGS.gpuAntiAliasing,
+    };
+  }
+
+  public static exportSaveBundleJson(
+    statsOverride?: PlayerStats,
+    settingsOverride?: CapyGameSettings,
+    ghostOverride?: QuantizedGhostRun | null
+  ): string {
+    const bundle: CapySaveBundle = {
+      schema: 'capygame-save-bundle-v1',
+      exportedAtIso: new Date().toISOString(),
+      saveKey: SAVE_KEY,
+      settingsKey: SETTINGS_KEY,
+      stats: this.sanitizePlayerStats(statsOverride ?? this.loadStats()),
+      settings: this.sanitizeGameSettings(settingsOverride ?? this.loadSettings()),
+      yuzuGhostRun:
+        ghostOverride !== undefined ? ghostOverride : loadBestYuzuGhostRun(),
+    };
+    return JSON.stringify(bundle, null, 2);
+  }
+
+  public static parseAndValidateSaveBundle(jsonText: string): SaveBundleImportResult {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch {
+      return { ok: false, error: 'Invalid JSON syntax. Please check your backup file.' };
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { ok: false, error: 'Backup JSON must be an object containing stats or settings.' };
+    }
+
+    const obj = parsed as Record<string, unknown>;
+    const warnings: string[] = [];
+    const hasStatsKey = typeof obj.stats === 'object' && obj.stats !== null;
+    const hasSettingsKey = typeof obj.settings === 'object' && obj.settings !== null;
+    const looksLikeRawStats =
+      !hasStatsKey &&
+      !hasSettingsKey &&
+      ('dna' in obj || 'coins' in obj || 'buildings' in obj || 'upgrades' in obj);
+    const looksLikeRawSettings =
+      !hasStatsKey &&
+      !hasSettingsKey &&
+      ('fov' in obj || 'gpuQualityPreset' in obj || 'drawDistance' in obj);
+
+    if (!hasStatsKey && !hasSettingsKey && !looksLikeRawStats && !looksLikeRawSettings) {
+      return {
+        ok: false,
+        error:
+          'Unrecognized save format. Expected capygame-save-bundle-v1 with stats and/or settings.',
+      };
+    }
+
+    const stats = hasStatsKey
+      ? this.sanitizePlayerStats(obj.stats, warnings)
+      : looksLikeRawStats
+        ? this.sanitizePlayerStats(obj, warnings)
+        : this.sanitizePlayerStats(this.loadStats());
+
+    const settings = hasSettingsKey
+      ? this.sanitizeGameSettings(obj.settings, warnings)
+      : looksLikeRawSettings
+        ? this.sanitizeGameSettings(obj, warnings)
+        : this.sanitizeGameSettings(this.loadSettings());
+
+    let yuzuGhostRun: QuantizedGhostRun | null = null;
+    if ('yuzuGhostRun' in obj && obj.yuzuGhostRun !== null && obj.yuzuGhostRun !== undefined) {
+      const validGhost = parseAndValidateGhostRun(obj.yuzuGhostRun);
+      if (validGhost) {
+        yuzuGhostRun = validGhost;
+      } else {
+        warnings.push('Ignored malformed yuzuGhostRun payload in backup.');
+      }
+    }
+
+    return { ok: true, stats, settings, yuzuGhostRun, warnings };
+  }
+
+  public static importSaveBundleJson(jsonText: string): SaveBundleImportResult {
+    const res = this.parseAndValidateSaveBundle(jsonText);
+    if (!res.ok) return res;
+    this.saveStats(res.stats);
+    this.saveSettings(res.settings);
+    if (res.yuzuGhostRun) {
+      saveYuzuGhostRunDirect(res.yuzuGhostRun);
+    }
+    return res;
+  }
+
   public static loadStats(forceReload: boolean = false): PlayerStats {
     this.ensureLifecycleHooks();
     if (this.cachedStats && !forceReload) return this.cachedStats;
@@ -52,34 +399,7 @@ export class ProgressionService {
           localStorage.getItem(LEGACY_SAVE_KEY_V2) ||
           localStorage.getItem('capy_game_save_v1');
         if (raw) {
-          const parsed = JSON.parse(raw);
-          const loaded: PlayerStats = {
-            ...INITIAL_PLAYER_STATS,
-            ...parsed,
-            dna: typeof parsed.dna === 'number' ? parsed.dna : INITIAL_PLAYER_STATS.dna,
-            coins: typeof parsed.coins === 'number' ? parsed.coins : INITIAL_PLAYER_STATS.coins,
-            evolutionStage: parsed.evolutionStage || 1,
-            activeMutations: Array.isArray(parsed.activeMutations) ? parsed.activeMutations : [],
-            unlockedMutations: Array.isArray(parsed.unlockedMutations)
-              ? parsed.unlockedMutations
-              : Array.isArray(parsed.activeMutations)
-                ? [...parsed.activeMutations]
-                : [],
-            upgrades: {
-              ...INITIAL_PLAYER_STATS.upgrades,
-              ...(parsed.upgrades || {}),
-            },
-            buildings:
-              Array.isArray(parsed.buildings) && parsed.buildings.length > 0
-                ? parsed.buildings
-                : INITIAL_PLAYER_STATS.buildings,
-            unlockedCosmetics:
-              Array.isArray(parsed.unlockedCosmetics) && parsed.unlockedCosmetics.length > 0
-                ? parsed.unlockedCosmetics
-                : INITIAL_PLAYER_STATS.unlockedCosmetics,
-            unlockedObjectMarkers: Boolean(parsed.unlockedObjectMarkers),
-            unlockedRealityRescaler: Boolean(parsed.unlockedRealityRescaler),
-          };
+          const loaded = this.sanitizePlayerStats(JSON.parse(raw));
           this.cachedStats = loaded;
           return loaded;
         }
@@ -87,7 +407,7 @@ export class ProgressionService {
     } catch (e) {
       console.warn('Failed to load CapyGame stats', e);
     }
-    const fallback: PlayerStats = { ...INITIAL_PLAYER_STATS };
+    const fallback: PlayerStats = structuredClone(INITIAL_PLAYER_STATS);
     this.cachedStats = fallback;
     return fallback;
   }
@@ -129,7 +449,7 @@ export class ProgressionService {
   }
 
   public static resetStats(): PlayerStats {
-    const fresh: PlayerStats = { ...INITIAL_PLAYER_STATS };
+    const fresh: PlayerStats = structuredClone(INITIAL_PLAYER_STATS);
     this.saveStats(fresh);
     return fresh;
   }
@@ -140,78 +460,7 @@ export class ProgressionService {
       if (typeof window !== 'undefined') {
         const raw = localStorage.getItem(SETTINGS_KEY);
         if (raw) {
-          const parsed = JSON.parse(raw);
-          const loaded: CapyGameSettings = {
-            ...DEFAULT_CAPY_SETTINGS,
-            ...parsed,
-            worldFogEnabled: false,
-            drawDistance:
-              typeof parsed.drawDistance === 'number' && Number.isFinite(parsed.drawDistance)
-                ? Math.max(90, Math.min(1350, Math.round(parsed.drawDistance)))
-                : parsed.gpuQualityPreset === 'performance'
-                  ? 135
-                  : DEFAULT_CAPY_SETTINGS.drawDistance,
-            realityScaleGamma:
-              typeof parsed.realityScaleGamma === 'number' &&
-              Number.isFinite(parsed.realityScaleGamma)
-                ? Math.max(0.28, Math.min(1.0, parsed.realityScaleGamma))
-                : DEFAULT_CAPY_SETTINGS.realityScaleGamma,
-            showObjectMarkers: Boolean(parsed.showObjectMarkers),
-            astrophysicsPalette:
-              parsed.astrophysicsPalette === 'hubble' ? 'hubble' : 'natural',
-            gpuExposure:
-              typeof parsed.gpuExposure === 'number' && Number.isFinite(parsed.gpuExposure)
-                ? Math.max(0.5, Math.min(2.0, parsed.gpuExposure))
-                : DEFAULT_CAPY_SETTINGS.gpuExposure,
-            gpuBloomStrength:
-              typeof parsed.gpuBloomStrength === 'number' &&
-              Number.isFinite(parsed.gpuBloomStrength)
-                ? Math.max(0.0, Math.min(1.5, parsed.gpuBloomStrength))
-                : DEFAULT_CAPY_SETTINGS.gpuBloomStrength,
-            gpuSharpenAmount:
-              typeof parsed.gpuSharpenAmount === 'number' &&
-              Number.isFinite(parsed.gpuSharpenAmount)
-                ? Math.max(0.0, Math.min(1.0, parsed.gpuSharpenAmount))
-                : DEFAULT_CAPY_SETTINGS.gpuSharpenAmount,
-            maxFpsLimit:
-              typeof parsed.maxFpsLimit === 'number' && Number.isFinite(parsed.maxFpsLimit)
-                ? parsed.maxFpsLimit <= 0
-                  ? 0
-                  : Math.max(24, Math.min(240, Math.round(parsed.maxFpsLimit)))
-                : DEFAULT_CAPY_SETTINGS.maxFpsLimit,
-            fpsTarget:
-              typeof parsed.fpsTarget === 'number' && Number.isFinite(parsed.fpsTarget)
-                ? Math.max(24, Math.min(240, Math.round(parsed.fpsTarget)))
-                : DEFAULT_CAPY_SETTINGS.fpsTarget,
-            showFpsButton:
-              parsed.showFpsButton === undefined
-                ? DEFAULT_CAPY_SETTINGS.showFpsButton
-                : Boolean(parsed.showFpsButton),
-            mouselookEnabled:
-              parsed.mouselookEnabled === undefined
-                ? DEFAULT_CAPY_SETTINGS.mouselookEnabled
-                : Boolean(parsed.mouselookEnabled),
-            mouselookSensitivity:
-              typeof parsed.mouselookSensitivity === 'number' &&
-              Number.isFinite(parsed.mouselookSensitivity)
-                ? Math.max(0.2, Math.min(2.5, Math.round(parsed.mouselookSensitivity * 20) / 20))
-                : DEFAULT_CAPY_SETTINGS.mouselookSensitivity,
-            invertMouseY:
-              parsed.invertMouseY === undefined
-                ? DEFAULT_CAPY_SETTINGS.invertMouseY
-                : Boolean(parsed.invertMouseY),
-            gpuResolutionScale:
-              typeof parsed.gpuResolutionScale === 'number' &&
-              Number.isFinite(parsed.gpuResolutionScale)
-                ? Math.max(0.5, Math.min(1.5, parsed.gpuResolutionScale))
-                : DEFAULT_CAPY_SETTINGS.gpuResolutionScale,
-            gpuAntiAliasing:
-              parsed.gpuAntiAliasing === 'msaa_fxaa' ||
-              parsed.gpuAntiAliasing === 'fxaa' ||
-              parsed.gpuAntiAliasing === 'none'
-                ? parsed.gpuAntiAliasing
-                : DEFAULT_CAPY_SETTINGS.gpuAntiAliasing,
-          };
+          const loaded = this.sanitizeGameSettings(JSON.parse(raw));
           this.cachedSettings = loaded;
           return loaded;
         }
