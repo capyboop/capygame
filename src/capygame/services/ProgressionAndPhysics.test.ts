@@ -26,6 +26,12 @@ import {
 } from '../config/ProceduralGameConfig';
 import { ShallowWaterFluidSolver } from '../engine/physics/ContiguousWorldTopology';
 import {
+  YuzuGhostRecorder,
+  createGhostPoseScratch,
+  parseAndValidateGhostRun,
+  sampleGhostRunAtTime,
+} from '../engine/physics/YuzuGhostRecorder';
+import {
   MOON_ORBIT_RADIUS_AT_8_85,
   MOON_RADIUS_AT_8_85,
   PLANET_BASE_RADIUS,
@@ -1095,5 +1101,121 @@ test('RAM & VRAM Footprint Guard: Capybara NPC pooling shares geometries/materia
     }
   }
 });
+
+test('YuzuGhostRecorder: records 20Hz quantized input/transform keyframes and interpolates shortest-angle poses with zero allocations', () => {
+  const recorder = new YuzuGhostRecorder();
+  recorder.startRun();
+  assert.equal(recorder.isActive(), true);
+
+  // Sample across 0.00s..0.20s with yaw crossing +-PI boundary
+  recorder.recordTick(0.0, 0.0, 0.6, -1.0, Math.PI - 0.1, 0.5, -1.0, true, true, false);
+  // Sub-interval call at 0.02s must be skipped until 0.05s boundary
+  recorder.recordTick(0.02, 0.2, 0.6, -1.5, Math.PI, 0.5, -1.0, true, true, false);
+  assert.equal(recorder.getFrameCount(), 1);
+
+  recorder.recordTick(0.05, 0.5, 1.2, -3.5, -Math.PI + 0.1, -0.5, -1.0, false, true, true);
+  recorder.recordTick(0.1, 1.0, 0.6, -6.0, -Math.PI + 0.2, 0.0, -1.0, true, true, false);
+  assert.equal(recorder.getFrameCount(), 3);
+
+  const finalized = recorder.finalizeRun(150, 1.2, 0.6, -57.5, Math.PI);
+  assert.ok(finalized);
+  assert.equal(finalized.version, 1);
+  assert.equal(finalized.frameCount, 4);
+  assert.equal(finalized.data.length, 4 * 6);
+
+  // Midpoint between frame 0 (t=0.00) and frame 1 (t=0.05) -> t=0.025s
+  const scratch = createGhostPoseScratch();
+  const ok = sampleGhostRunAtTime(finalized, 0.025, scratch);
+  assert.equal(ok, true);
+  assert.ok(Math.abs(scratch.x - 0.25) < 0.02);
+  assert.ok(Math.abs(scratch.y - 0.9) < 0.02);
+  assert.ok(Math.abs(scratch.z - -2.25) < 0.02);
+  // Shortest-angle across +PI/-PI boundary stays near +-PI instead of interpolating through 0!
+  assert.ok(Math.abs(Math.abs(scratch.yaw) - Math.PI) < 0.05);
+  assert.equal(scratch.grounded, true);
+  assert.equal(scratch.moving, true);
+  assert.ok(Math.abs(scratch.inputX - 0.466) < 0.1);
+
+  // Validate round-trip serialization and malformed payload rejection
+  const reparsed = parseAndValidateGhostRun(JSON.parse(JSON.stringify(finalized)));
+  assert.ok(reparsed);
+  assert.equal(reparsed.durationMs, 150);
+  assert.equal(parseAndValidateGhostRun({ version: 1, durationMs: 50, frameCount: 2, data: [] }), null);
+});
+
+test('ProgressionService JSON Save Portability: exports, validates, clamps, and restores stats, settings, and ghost runs', () => {
+  const customStats = structuredClone(INITIAL_PLAYER_STATS);
+  customStats.dna = 142;
+  customStats.coins = 380;
+  customStats.prestigeLevel = 3;
+  customStats.activeHat = 'crown';
+  customStats.unlockedCosmetics = ['yuzu', 'flower', 'crown'];
+  customStats.highScoreFallGuys = 7;
+
+  const customSettings = {
+    ...DEFAULT_CAPY_SETTINGS,
+    fov: 68,
+    drawDistance: 280,
+    astrophysicsPalette: 'hubble' as const,
+  };
+
+  const recorder = new YuzuGhostRecorder();
+  recorder.startRun();
+  recorder.recordTick(0.0, 0, 0.6, -1.0, Math.PI, 0, -1, true, true, false);
+  recorder.recordTick(0.05, 0.1, 0.6, -3.0, Math.PI, 0, -1, true, true, false);
+  const ghost = recorder.finalizeRun(8450, 0, 0.6, -57.5, Math.PI);
+  assert.ok(ghost);
+
+  const exportedJson = ProgressionService.exportSaveBundleJson(customStats, customSettings, ghost);
+  const parsed = ProgressionService.parseAndValidateSaveBundle(exportedJson);
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) {
+    assert.equal(parsed.stats.dna, 142);
+    assert.equal(parsed.stats.coins, 380);
+    assert.equal(parsed.stats.prestigeLevel, 3);
+    assert.equal(parsed.stats.activeHat, 'crown');
+    assert.equal(parsed.stats.highScoreFallGuys, 7);
+    assert.equal(parsed.settings.fov, 68);
+    assert.equal(parsed.settings.drawDistance, 280);
+    assert.equal(parsed.settings.astrophysicsPalette, 'hubble');
+    assert.ok(parsed.yuzuGhostRun);
+    assert.equal(parsed.yuzuGhostRun.durationMs, 8450);
+  }
+
+  // Reject malformed syntax or non-bundle objects cleanly
+  const badJson = ProgressionService.parseAndValidateSaveBundle('{not valid json');
+  assert.equal(badJson.ok, false);
+  const unknownShape = ProgressionService.parseAndValidateSaveBundle(JSON.stringify({ hello: 'world' }));
+  assert.equal(unknownShape.ok, false);
+
+  // Clamps out-of-range numeric settings and filters invalid building/mutation entries
+  const clamped = ProgressionService.parseAndValidateSaveBundle(
+    JSON.stringify({
+      schema: 'capygame-save-bundle-v1',
+      stats: {
+        dna: 99,
+        coins: -50,
+        activeMutations: ['flippers', 'invalid_mut'],
+      },
+      settings: {
+        fov: 120,
+        drawDistance: 99999,
+        realityScaleGamma: 0.05,
+        worldFogEnabled: true,
+      },
+    })
+  );
+  assert.equal(clamped.ok, true);
+  if (clamped.ok) {
+    assert.equal(clamped.stats.dna, 99);
+    assert.equal(clamped.stats.coins, 0);
+    assert.deepEqual(clamped.stats.activeMutations, ['flippers']);
+    assert.equal(clamped.settings.fov, 75);
+    assert.equal(clamped.settings.drawDistance, 1350);
+    assert.equal(clamped.settings.realityScaleGamma, 0.28);
+    assert.equal(clamped.settings.worldFogEnabled, false);
+  }
+});
+
 
 

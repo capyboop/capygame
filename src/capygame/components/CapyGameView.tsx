@@ -101,6 +101,7 @@ import {
   Play,
   Copy,
   Download,
+  Upload,
   Activity,
   Trash2,
   Sun,
@@ -386,6 +387,13 @@ export const CapyGameView: React.FC = () => {
   const [debugReportText, setDebugReportText] = useState<string>('');
   const [selectedSnippet, setSelectedSnippet] = useState<string>('');
   const [isReportCopied, setIsReportCopied] = useState<boolean>(false);
+  const saveImportFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isSaveJsonPasteOpen, setIsSaveJsonPasteOpen] = useState<boolean>(false);
+  const [saveJsonDraft, setSaveJsonDraft] = useState<string>('');
+  const [savePortabilityFeedback, setSavePortabilityFeedback] = useState<{
+    tone: 'ok' | 'error';
+    message: string;
+  } | null>(null);
   const [perfLog, setPerfLog] = useState<PerformanceLogSnapshot>({
     liveFps: 60,
     avgFps: 60,
@@ -1912,6 +1920,90 @@ export const CapyGameView: React.FC = () => {
     managerRef.current?.refreshSanctuaryBuildings();
     AudioService.playSplash();
     showToast('Simulation state reset');
+  };
+
+  const applyImportedSaveBundle = (rawText: string) => {
+    const res = ProgressionService.importSaveBundleJson(rawText);
+    if (!res.ok) {
+      setSavePortabilityFeedback({ tone: 'error', message: res.error });
+      showToast(res.error);
+      return;
+    }
+    setStats(res.stats);
+    setGameSettings(res.settings);
+    managerRef.current?.updateStats(res.stats);
+    managerRef.current?.updateSettings(res.settings);
+    managerRef.current?.refreshSanctuaryBuildings();
+    managerRef.current?.reloadYuzuBestGhostFromStorage();
+    if (managerRef.current) {
+      setGpuTelemetry(managerRef.current.getGpuEngineTelemetry());
+    }
+    AudioService.playPrestigeFanfare();
+    const ghostNote = res.yuzuGhostRun
+      ? ` + Yuzu Ghost PB (${(res.yuzuGhostRun.durationMs / 1000).toFixed(2)}s)`
+      : '';
+    const warnNote = res.warnings.length > 0 ? ` (${res.warnings.length} clamped)` : '';
+    const okMsg = `Imported save (${res.stats.dna} DNA, ${res.stats.coins}c)${ghostNote}${warnNote}.`;
+    setSavePortabilityFeedback({ tone: 'ok', message: okMsg });
+    setSaveJsonDraft('');
+    setIsSaveJsonPasteOpen(false);
+    showToast(okMsg);
+  };
+
+  const handleExportSaveBundleFile = () => {
+    const json = ProgressionService.exportSaveBundleJson(stats, gameSettings);
+    try {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `capygame-save-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Fallback to draft drawer if blob downloads are restricted
+    }
+    setSaveJsonDraft(json);
+    setSavePortabilityFeedback({
+      tone: 'ok',
+      message: 'Exported capy_game_save_v3 & capy_game_settings_v1 JSON backup.',
+    });
+    showToast('Exported Save & Settings JSON');
+  };
+
+  const handleCopySaveBundleJson = async () => {
+    const json = ProgressionService.exportSaveBundleJson(stats, gameSettings);
+    setSaveJsonDraft(json);
+    setIsSaveJsonPasteOpen(true);
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(json);
+      }
+    } catch {
+      // Clipboard may be blocked in non-HTTPS contexts; preview remains open for copy
+    }
+    setSavePortabilityFeedback({
+      tone: 'ok',
+      message: 'Copied JSON backup to clipboard and opened preview.',
+    });
+    showToast('Save JSON copied');
+  };
+
+  const handleImportSaveFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      applyImportedSaveBundle(text);
+    } catch {
+      setSavePortabilityFeedback({
+        tone: 'error',
+        message: 'Could not read selected JSON file.',
+      });
+    }
   };
 
   const getHighScoreForMode = (mode: PlayStyle): number => {
@@ -6098,6 +6190,106 @@ export const CapyGameView: React.FC = () => {
                     </button>
                   </div>
                 </div>
+              </div>
+
+              {/* Cloud Save & Settings Portability (capy_game_save_v3 + capy_game_settings_v1) */}
+              <div
+                data-testid="settings-save-portability-panel"
+                className="p-3 rounded-lg bg-zinc-950/90 border border-emerald-400/20 space-y-2.5"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-zinc-100">
+                      Save &amp; Settings Portability (JSON)
+                    </div>
+                    <div className="text-[10px] font-mono text-zinc-400 mt-0.5">
+                      Backup or transfer capy_game_save_v3, settings &amp; Yuzu ghost PB
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      data-testid="settings-export-save-btn"
+                      onClick={handleExportSaveBundleFile}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-mono bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-400/35 cursor-pointer"
+                    >
+                      <Download className="w-3 h-3" />
+                      <span>Export JSON</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="settings-copy-save-btn"
+                      onClick={() => void handleCopySaveBundleJson()}
+                      className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-mono bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-white/15 cursor-pointer"
+                    >
+                      <Copy className="w-3 h-3" />
+                      <span>Copy</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="settings-import-save-btn"
+                      onClick={() => saveImportFileInputRef.current?.click()}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-mono bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-400/35 cursor-pointer"
+                    >
+                      <Upload className="w-3 h-3" />
+                      <span>Import File</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="settings-toggle-paste-save-btn"
+                      onClick={() => setIsSaveJsonPasteOpen((prev) => !prev)}
+                      className="px-2 py-1 rounded text-[11px] font-mono bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/15 cursor-pointer"
+                    >
+                      {isSaveJsonPasteOpen ? 'Hide JSON' : 'Paste JSON'}
+                    </button>
+                  </div>
+                </div>
+
+                <input
+                  ref={saveImportFileInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  data-testid="settings-import-save-input"
+                  onChange={(e) => void handleImportSaveFileChange(e)}
+                  className="hidden"
+                />
+
+                {isSaveJsonPasteOpen && (
+                  <div className="space-y-2 pt-1 border-t border-white/10">
+                    <textarea
+                      data-testid="settings-import-json-textarea"
+                      value={saveJsonDraft}
+                      onChange={(e) => setSaveJsonDraft(e.target.value)}
+                      placeholder='Paste capygame-save-bundle-v1 JSON here...'
+                      rows={5}
+                      className="w-full rounded-lg bg-zinc-900 border border-white/15 p-2 text-[11px] font-mono text-zinc-100 focus:outline-none focus:border-sky-400/60"
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        data-testid="settings-apply-import-json-btn"
+                        disabled={!saveJsonDraft.trim()}
+                        onClick={() => applyImportedSaveBundle(saveJsonDraft)}
+                        className="px-3 py-1 rounded text-[11px] font-mono bg-sky-500/20 hover:bg-sky-500/30 disabled:opacity-40 text-sky-200 border border-sky-400/40 cursor-pointer"
+                      >
+                        Apply Backup JSON
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {savePortabilityFeedback && (
+                  <div
+                    data-testid="settings-save-status"
+                    className={`text-[11px] font-mono px-2.5 py-1.5 rounded border ${
+                      savePortabilityFeedback.tone === 'ok'
+                        ? 'bg-emerald-500/10 text-emerald-300 border-emerald-400/30'
+                        : 'bg-rose-500/10 text-rose-300 border-rose-400/30'
+                    }`}
+                  >
+                    {savePortabilityFeedback.message}
+                  </div>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/10">
