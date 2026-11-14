@@ -217,6 +217,7 @@ export class ProgressionService {
     return {
       ...DEFAULT_CAPY_SETTINGS,
       ...parsed,
+      advancedMode: Boolean(parsed.advancedMode),
       worldFogEnabled: false,
       drawDistance:
         typeof parsed.drawDistance === 'number' && Number.isFinite(parsed.drawDistance)

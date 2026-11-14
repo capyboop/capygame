@@ -268,6 +268,8 @@ export interface GameEventCallbacks {
   ) => void;
   onUniverseScaleChange?: (scaleInfo: UniverseScaleTelemetry) => void;
   onOrbitTelemetryChange?: (telemetry: OrbitTelemetry) => void;
+  onZoomThumbnailUpdated?: (bandId: UniverseScaleBandId, dataUrl: string) => void;
+  onZoomThumbnailsReset?: () => void;
 }
 
 export class PlayStyleManager {
@@ -351,6 +353,17 @@ export class PlayStyleManager {
   private seamlessTelemetryAccum: number = 0;
   private lastSoftwareRenderMs: number = -1000;
   public allFeaturesUnlockedOverride: boolean = false;
+  private disposed: boolean = false;
+  private idleWarmupCancel: (() => void) | null = null;
+
+  // Dynamic Scale-Band Thumbnail Snapshot State (reusable 256x160 offscreen canvas, zero per-frame allocs)
+  private thumbCanvas: HTMLCanvasElement | null = null;
+  private thumbCtx: CanvasRenderingContext2D | null = null;
+  private thumbStyleEpoch: number = 1;
+  private thumbBandVersion: Partial<Record<UniverseScaleBandId, number>> = {};
+  private thumbSettledBandId: UniverseScaleBandId | null = null;
+  private thumbSettledAccumSec: number = 0;
+  private pendingThumbnailBandId: UniverseScaleBandId | null = null;
 
   public selectedGalaxyIndex: number = 0;
   public selectedStarIndex: number = 0;
@@ -941,7 +954,11 @@ export class PlayStyleManager {
     if (this.isWebGpu) {
       convertLegacyShaderMaterialsToTsl(this.scene);
     } else if (!this.isSoftwareGl) {
-      (this.renderer as THREE.WebGLRenderer).compile(this.scene, this.camera);
+      const glRenderer = this.renderer as THREE.WebGLRenderer;
+      glRenderer.compile(this.chronoVessel.root, this.camera, this.scene);
+      glRenderer.compile(this.heroCapy, this.camera, this.scene);
+      glRenderer.compile(this.seamlessUniverse.celestialBackdropGroup, this.camera, this.scene);
+      this.scheduleIdlePipelineWarmup();
     }
 
     const skipCosmic =
@@ -969,6 +986,98 @@ export class PlayStyleManager {
       this.emitCosmicState();
       this.callbacks.onUniverseScaleChange?.(this.getUniverseScaleTelemetry());
     }
+  }
+
+  private scheduleIdlePipelineWarmup(): void {
+    if (typeof window === 'undefined' || this.isSoftwareGl || this.isWebGpu || this.disposed) {
+      return;
+    }
+    const glRenderer = this.renderer as THREE.WebGLRenderer;
+    if (typeof glRenderer.compileAsync !== 'function') {
+      return;
+    }
+
+    const queue: THREE.Object3D[] = [
+      ...this.seamlessUniverse.rootGroup.children,
+      this.worldBaseGroup,
+      this.sanctuaryGroup,
+      this.vfxEngine.rootGroup,
+      this.sporeGroup,
+      this.breakoutGroup,
+      this.runnerGroup,
+      this.fallGuysGroup,
+    ];
+    let index = 0;
+    let timerId: number | null = null;
+    let idleId: number | null = null;
+    let cancelled = false;
+
+    const win = window as Window & {
+      requestIdleCallback?: (
+        cb: (deadline: { timeRemaining: () => number; didTimeout: boolean }) => void,
+        opts?: { timeout: number }
+      ) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+
+    const scheduleNext = () => {
+      if (cancelled || this.disposed || index >= queue.length) {
+        return;
+      }
+      if (typeof win.requestIdleCallback === 'function') {
+        idleId = win.requestIdleCallback(
+          (deadline) => {
+            idleId = null;
+            if (cancelled || this.disposed) return;
+            if (deadline.timeRemaining() > 4 || deadline.didTimeout) {
+              const target = queue[index++];
+              if (target) {
+                void glRenderer
+                  .compileAsync(target, this.camera, this.scene)
+                  .catch(() => undefined)
+                  .finally(() => {
+                    if (!cancelled && !this.disposed && index < queue.length) {
+                      timerId = window.setTimeout(scheduleNext, 35);
+                    }
+                  });
+                return;
+              }
+            }
+            scheduleNext();
+          },
+          { timeout: 650 }
+        );
+      } else {
+        timerId = window.setTimeout(() => {
+          timerId = null;
+          if (cancelled || this.disposed) return;
+          const target = queue[index++];
+          if (target) {
+            void glRenderer
+              .compileAsync(target, this.camera, this.scene)
+              .catch(() => undefined)
+              .finally(() => {
+                if (!cancelled && !this.disposed && index < queue.length) {
+                  scheduleNext();
+                }
+              });
+          }
+        }, 65);
+      }
+    };
+
+    timerId = window.setTimeout(scheduleNext, 450);
+    this.idleWarmupCancel = () => {
+      cancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
+      if (idleId !== null && typeof win.cancelIdleCallback === 'function') {
+        win.cancelIdleCallback(idleId);
+        idleId = null;
+      }
+    };
   }
 
   private setSceneBackgroundHex(hex: number): void {
@@ -1227,6 +1336,9 @@ export class PlayStyleManager {
         this.cosmicStage === 'capy_selection' ||
         (this.seamlessZoomActive && this.currentLogScaleMeters <= 3.1)
     );
+    if (manualTimeChanged) {
+      this.invalidateZoomThumbnails('capybara_forest');
+    }
     this.emitTelemetry();
   }
 
@@ -2555,6 +2667,7 @@ export class PlayStyleManager {
     }
 
     this.applyFogSetting();
+    this.invalidateZoomThumbnails();
     this.emitTelemetry();
     this.callbacks.onUniverseScaleChange?.(this.getUniverseScaleTelemetry());
   }
@@ -3147,6 +3260,7 @@ export class PlayStyleManager {
     });
 
     this.syncWorldPhysicsColliders();
+    this.invalidateZoomThumbnails('capybara_forest');
   }
 
   public syncWorldPhysicsColliders() {
@@ -5537,7 +5651,8 @@ export class PlayStyleManager {
           const zx = ZONE_LOCATIONS.sanctuary.x;
           const zz = ZONE_LOCATIONS.sanctuary.z;
 
-          // 1. Procedural Exponential Fruit Trees: ONLY clear whole screen when tree blocks [camera -> player] or encloses camera lens
+          // 1. Procedural Exponential Fruit Trees: ONLY clear when trunk/core crown strictly blocks [camera -> player]
+          //    Never trigger on peripheral or behind-camera trees so edge canopies & trunks stay solid.
           for (let i = 0; i < this.sanctuaryTrees.length; i++) {
             const tr = this.sanctuaryTrees[i];
             const wx = zx + tr.x;
@@ -5546,37 +5661,38 @@ export class PlayStyleManager {
             const th = tr.trunkHeight;
             const horizProj = (wx - camX) * horizDirX + (wz - camZ) * horizDirZ;
             const rootedInFrontOfPlayer =
-              horizLen > 0.5 && horizProj > -cr && horizProj < horizLen - 0.2;
+              horizLen > 0.5 && horizProj > 0.35 && horizProj < horizLen - 0.35;
             const camCrownDx = wx - camX;
-            const camCrownDy = th * 1.02 - camY;
+            const camCrownDy = th * 0.92 - camY;
             const camCrownDz = wz - camZ;
+            const cameraCoreRadius = Math.min(cr * 0.56, 2.25);
             const cameraInsideCanopy =
               horizLen > 1.8 &&
-              horizProj < horizLen - 1.5 &&
+              horizProj > 0.25 &&
+              horizProj < horizLen - 1.2 &&
               camCrownDx * camCrownDx +
                 camCrownDy * camCrownDy +
                 camCrownDz * camCrownDz <=
-                cr * 1.04 * (cr * 1.04);
+                cameraCoreRadius * cameraCoreRadius;
 
+            const trunkCheckRadius = Math.max(0.55, tr.trunkRadius * 1.55);
+            const crownCoreRadius = Math.min(cr * 0.62, 2.35);
             const blocks =
               cameraInsideCanopy ||
               (rootedInFrontOfPlayer &&
-                (blocksPlayerCorridor(
-                  wx,
-                  th * 0.45,
-                  wz,
-                  Math.max(0.75, tr.trunkRadius * 2.2)
-                ) ||
-                  blocksPlayerCorridor(wx, th * 1.02, wz, cr * 0.85)));
+                (blocksPlayerCorridor(wx, th * 0.34, wz, trunkCheckRadius) ||
+                  blocksPlayerCorridor(wx, th * 0.68, wz, Math.max(0.5, tr.trunkRadius * 1.45)) ||
+                  blocksPlayerCorridor(wx, th * 0.94, wz, crownCoreRadius)));
 
             if (blocks) {
               this.markObjectHierarchyOccluded(tr.rootGroup);
-            } else {
-              const rLim = cr + 1.5;
+            } else if (rootedInFrontOfPlayer) {
+              const rCore = Math.min(cr * 0.55, 2.1);
               if (
                 distSqPointToSegment2D(wx, wz, camX, camZ, headX, headZ) <=
-                rLim * rLim
+                rCore * rCore
               ) {
+                tr.rootGroup.userData.__isSanctuaryTree = true;
                 _occluderCandidates.push(tr.rootGroup);
               }
             }
@@ -5780,6 +5896,9 @@ export class PlayStyleManager {
               if (resolvedRoot.userData?.__isDachshundSegment && r > 1) {
                 continue;
               }
+              if (resolvedRoot.userData?.__isSanctuaryTree && r !== 0 && r !== 5 && r !== 6) {
+                continue;
+              }
               this.markObjectHierarchyOccluded(resolvedRoot);
             }
           }
@@ -5908,6 +6027,9 @@ export class PlayStyleManager {
       this.profiler.startPhase('cosmic_universe');
       this.tickSeamlessUniverse(dt);
       this.profiler.endPhase('cosmic_universe');
+
+      const activeBandId = UNIVERSE_SCALE_BANDS[findNearestScaleBandIndex(this.currentLogScaleMeters)].id;
+      this.trackSettledBandForThumbnail(activeBandId, dt);
 
       const inForestWindow =
         this.currentLogScaleMeters >= -0.85 && this.currentLogScaleMeters <= 3.1;
@@ -6089,6 +6211,10 @@ export class PlayStyleManager {
       this.profiler.endPhase('telemetry_hud');
     }
 
+    if (this.cosmicStage === 'playing' && this.currentMode === 'sanctuary') {
+      this.trackSettledBandForThumbnail('capybara_forest', dt);
+    }
+
     this.renderSceneFrame(rawFrameDt, tickStartMs);
   }
 
@@ -6125,6 +6251,11 @@ export class PlayStyleManager {
     this.profiler.beginGpuRender();
     try {
       this.gpuEngine.render();
+      if (this.pendingThumbnailBandId !== null) {
+        const captureBand = this.pendingThumbnailBandId;
+        this.pendingThumbnailBandId = null;
+        this.captureScaleBandThumbnail(captureBand);
+      }
     } finally {
       this.profiler.endGpuRender();
       this.scene.matrixWorldAutoUpdate = prevSceneMatrixAuto;
@@ -9290,6 +9421,7 @@ export class PlayStyleManager {
     if (this.seamlessZoomActive) {
       this.tickSeamlessUniverse(0.001);
     }
+    this.invalidateZoomThumbnails();
     this.callbacks.onUniverseScaleChange?.(this.getUniverseScaleTelemetry());
   }
 
@@ -9299,6 +9431,7 @@ export class PlayStyleManager {
     if (this.seamlessZoomActive) {
       this.tickSeamlessUniverse(0.001);
     }
+    this.invalidateZoomThumbnails();
     this.callbacks.onUniverseScaleChange?.(this.getUniverseScaleTelemetry());
   }
 
@@ -9308,6 +9441,7 @@ export class PlayStyleManager {
     if (this.seamlessZoomActive) {
       this.tickSeamlessUniverse(0.001);
     }
+    this.invalidateZoomThumbnails();
     this.callbacks.onUniverseScaleChange?.(this.getUniverseScaleTelemetry());
   }
 
@@ -9316,11 +9450,94 @@ export class PlayStyleManager {
     if (this.seamlessZoomActive) {
       this.tickSeamlessUniverse(0.001);
     }
+    this.invalidateZoomThumbnails();
     this.callbacks.onUniverseScaleChange?.(this.getUniverseScaleTelemetry());
   }
 
   public getGalaxyMorphology(): GalaxyMorphology {
     return this.seamlessUniverse.getGalaxyMorphology();
+  }
+
+  public invalidateZoomThumbnails(specificBandId?: UniverseScaleBandId): void {
+    if (specificBandId) {
+      delete this.thumbBandVersion[specificBandId];
+      if (this.thumbSettledBandId === specificBandId) {
+        this.thumbSettledAccumSec = 0.25;
+      }
+      return;
+    }
+    this.thumbStyleEpoch += 1;
+    this.thumbSettledAccumSec = 0;
+    this.callbacks.onZoomThumbnailsReset?.();
+  }
+
+  public requestCurrentBandThumbnail(): void {
+    if (this.seamlessZoomActive) {
+      const bandId = UNIVERSE_SCALE_BANDS[findNearestScaleBandIndex(this.currentLogScaleMeters)].id;
+      this.pendingThumbnailBandId = bandId;
+      return;
+    }
+    if (this.cosmicStage === 'playing' && this.currentMode === 'sanctuary') {
+      this.pendingThumbnailBandId = 'capybara_forest';
+    }
+  }
+
+  private trackSettledBandForThumbnail(bandId: UniverseScaleBandId, dt: number): void {
+    if (this.thumbSettledBandId !== bandId) {
+      this.thumbSettledBandId = bandId;
+      this.thumbSettledAccumSec = 0;
+      return;
+    }
+    if (this.thumbBandVersion[bandId] === this.thumbStyleEpoch) {
+      return;
+    }
+    this.thumbSettledAccumSec += dt;
+    if (this.thumbSettledAccumSec >= 0.28) {
+      this.pendingThumbnailBandId = bandId;
+    }
+  }
+
+  private captureScaleBandThumbnail(bandId: UniverseScaleBandId): void {
+    if (typeof document === 'undefined' || !this.callbacks.onZoomThumbnailUpdated) return;
+    const srcCanvas = this.renderer?.domElement;
+    if (!srcCanvas || srcCanvas.width < 16 || srcCanvas.height < 16) return;
+    if (!this.thumbCanvas) {
+      this.thumbCanvas = document.createElement('canvas');
+      this.thumbCanvas.width = 256;
+      this.thumbCanvas.height = 160;
+      this.thumbCtx = this.thumbCanvas.getContext('2d');
+    }
+    if (!this.thumbCtx) return;
+
+    const dstW = 256;
+    const dstH = 160;
+    const targetAspect = dstW / dstH;
+    const srcW = srcCanvas.width;
+    const srcH = srcCanvas.height;
+    const srcAspect = srcW / srcH;
+
+    let sx = 0;
+    let sy = 0;
+    let sw = srcW;
+    let sh = srcH;
+    if (srcAspect > targetAspect) {
+      sw = Math.round(srcH * targetAspect);
+      sx = Math.round((srcW - sw) * 0.5);
+    } else if (srcAspect < targetAspect) {
+      sh = Math.round(srcW / targetAspect);
+      sy = Math.round((srcH - sh) * 0.5);
+    }
+
+    try {
+      this.thumbCtx.drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, dstW, dstH);
+      const dataUrl = this.thumbCanvas.toDataURL('image/jpeg', 0.8);
+      if (dataUrl && dataUrl.startsWith('data:image/')) {
+        this.thumbBandVersion[bandId] = this.thumbStyleEpoch;
+        this.callbacks.onZoomThumbnailUpdated(bandId, dataUrl);
+      }
+    } catch {
+      // Ignore tainted-canvas or software fallback read errors cleanly
+    }
   }
 
   public getUniverseScaleTelemetry(): UniverseScaleTelemetry {
@@ -9715,6 +9932,9 @@ export class PlayStyleManager {
   }
 
   public dispose() {
+    this.disposed = true;
+    this.idleWarmupCancel?.();
+    this.idleWarmupCancel = null;
     this.cancelBuildingPlacementGhost(true);
     ProgressionService.flushPendingSave();
     AudioService.dispose();

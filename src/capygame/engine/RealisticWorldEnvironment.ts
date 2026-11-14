@@ -2295,6 +2295,7 @@ export class RealisticWorldEnvironment {
     skeletonGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvArr, 2));
     skeletonGeo.setIndex(idxArr);
     skeletonGeo.computeVertexNormals();
+    skeletonGeo.computeBoundingSphere();
 
     const skeletonMesh = new THREE.Mesh(skeletonGeo, barkMat);
     skeletonMesh.name = 'ProceduralTreeBranchSkeleton';

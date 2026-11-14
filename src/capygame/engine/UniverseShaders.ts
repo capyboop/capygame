@@ -468,7 +468,9 @@ export function createDustPillarMaterial(opts: {
         vec3 irStar = vec3(1.0, 0.82, 0.52) * exp(-tipDist * tipDist * 9.0) * 1.4;
 
         vec3 rgb = acesToneMap(interior + rimHdr + irStar);
-        float alpha = clamp((silhouette * 0.94 + outerHalo * 0.36 * topIllum) * uOpacity, 0.0, 0.96);
+        float edgeFadeX = 1.0 - smoothstep(0.68, 0.98, abs(x));
+        float edgeFadeY = 1.0 - smoothstep(0.84, 0.99, y);
+        float alpha = clamp((silhouette * 0.94 + outerHalo * 0.36 * topIllum) * edgeFadeX * edgeFadeY * uOpacity, 0.0, 0.96);
         if (alpha < 0.005) discard;
         gl_FragColor = vec4(rgb, alpha);
       }
@@ -885,26 +887,28 @@ export function createHabitablePlanetMaterial(
         float dSanc = length(p - normalize(uSanctuaryDir));
         float continentPedestal = exp(-pow(dSanc / 0.23, 2.1)) * 0.165;
         float islandArchipelago = exp(-pow(dSanc / 0.036, 2.0)) * 0.085;
-        // Gentle sunny landing lagoon indentation beside core meadow
+        // Sunny landing lagoon & coastal archipelago strait visible at +3.6 (3.98 km) aerial altitude
         float lagoonCut = exp(-pow(length((p - normalize(uSanctuaryDir)) * vec3(1.0, 1.4, 1.0) - vec3(0.011, 0.0, -0.008)) / 0.0075, 2.0)) * 0.065;
+        float sanctuarySeaRing = smoothstep(0.00028, 0.00095, dSanc) * (1.0 - smoothstep(0.0022, 0.0046, dSanc));
 
         float microTerrain = 0.0;
         if (detailWeight > 0.01) {
           float mesoRidge = (ridgedFbm4(p * 38.0 + warp * 0.6) - 0.35) * 0.075;
           float coastalFbm = (fbm4(p * 145.0) - 0.48) * 0.045;
-          float fineGeo = (fbm4(p * 540.0) - 0.48) * 0.025;
+          float fineGeo = (fbm4(p * 620.0) - 0.48) * 0.040;
           microTerrain = (mesoRidge + coastalFbm + fineGeo) * detailWeight;
           ridges = mix(ridges, clamp(ridges * 0.65 + ridgedFbm4(p * 42.0) * 0.55, 0.0, 1.0), detailWeight * 0.72);
           detail = mix(detail, clamp(detail * 0.55 + fbm4(p * 165.0) * 0.55, 0.0, 1.0), detailWeight * 0.75);
         }
 
-        // Flatten immediate Sanctuary meadow bowl near dSanc < 0.0022 so it transitions cleanly into Ecosystems/Forest
-        float landingBowl = smoothstep(0.0008, 0.0045, dSanc);
-        microTerrain *= mix(0.22, 1.0, landingBowl);
+        // Flatten immediate Sanctuary meadow bowl and carve sunlit island moat ring for clear +3.6 aerial silhouettes
+        float landingBowl = smoothstep(0.00032, 0.0024, dSanc);
+        microTerrain *= mix(0.28, 1.0, landingBowl);
+        float moatCarve = sanctuarySeaRing * (0.28 + 0.12 * smoothstep(0.35, 0.75, detail)) * detailWeight;
 
         ridgesOut = ridges;
         detailOut = detail;
-        return cont + continentPedestal + islandArchipelago - lagoonCut + microTerrain;
+        return cont + continentPedestal + islandArchipelago - lagoonCut - moatCarve + microTerrain;
       }
 
       void main() {

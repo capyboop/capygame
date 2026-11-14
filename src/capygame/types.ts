@@ -264,6 +264,7 @@ import type {
 } from './engine/gpu/GpuEngineTypes';
 
 export interface CapyGameSettings {
+  advancedMode: boolean;
   cameraFollowBehind: boolean;
   mouselookEnabled: boolean;
   mouselookSensitivity: number;
@@ -305,6 +306,7 @@ export interface CapyGameSettings {
 }
 
 export const DEFAULT_CAPY_SETTINGS: CapyGameSettings = {
+  advancedMode: false,
   cameraFollowBehind: true,
   mouselookEnabled: true,
   mouselookSensitivity: 1.0,
@@ -1578,7 +1580,7 @@ export const UNIVERSE_SCALE_BANDS: UniverseScaleBandSpec[] = [
     logMeters: 7.10,
     typicalSizeLabel: '1.27×10^7 m · Planetary Diameter',
     domain: 'planetary',
-    skyHex: 0x04132b,
+    skyHex: 0x01040c,
     accentHex: 0x22c55e,
   },
   {
