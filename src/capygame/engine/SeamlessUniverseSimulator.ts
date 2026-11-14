@@ -549,11 +549,11 @@ export class SeamlessUniverseSimulator {
     geo.setAttribute('aLuminosity', new THREE.BufferAttribute(lums, 1));
 
     const psfMat = createStarPsfMaterial({
-      baseSize: 34.0,
-      minPixelSize: 1.5,
-      maxPixelSize: 14.0,
-      diffractionStrength: 0.48,
-      opacity: 0.92,
+      baseSize: 66.0,
+      minPixelSize: 1.9,
+      maxPixelSize: 18.0,
+      diffractionStrength: 0.62,
+      opacity: 1.0,
     });
     const stars = new THREE.Points(geo, psfMat);
     stars.frustumCulled = false;
@@ -2490,7 +2490,7 @@ export class SeamlessUniverseSimulator {
     moonPivot.add(moonMesh);
     this.planetaryMoonMesh = moonMesh;
 
-    const moonGlint = this.createSinglePointGlint(0xf1f5f9, 8.5, 0.24);
+    const moonGlint = this.createSinglePointGlint(0xf1f5f9, 13.5, 0.46);
     moonMesh.add(moonGlint);
 
     // 2. Shepherd Asteroid / Minimoon "Yuzu-1" (5.0 units orbit, 0.032 units radius)
@@ -2517,12 +2517,16 @@ export class SeamlessUniverseSimulator {
     minimoonMesh.position.set(MINIMOON_ORBIT_RADIUS_AT_8_85, 0, 0);
     minimoonPivot.add(minimoonMesh);
 
-    const miniGlint = this.createSinglePointGlint(0xfacc15, 6.5, 0.22);
+    const miniGlint = this.createSinglePointGlint(0xfacc15, 10.5, 0.36);
     minimoonMesh.add(miniGlint);
 
     // 3. Outer Hill Sphere Gravitational Boundary Hairline (21.0 units)
     const { line: hillLine } = this.createOrbitHairline(21.0, 0.0, 0x38bdf8);
     systemGroup.add(hillLine);
+
+    const moonOrbitMat = moonOrbitLine.material as THREE.LineBasicMaterial;
+    const miniOrbitMat = miniOrbitLine.material as THREE.LineBasicMaterial;
+    const hillOrbitMat = hillLine.material as THREE.LineBasicMaterial;
 
     // Registered Navigational Markers
     const earthAnchor = new THREE.Object3D();
@@ -2569,9 +2573,12 @@ export class SeamlessUniverseSimulator {
     return (dt, _elapsed, _gamma, showMarkers) => {
       moonPivot.rotation.y += dt * 0.018;
       minimoonPivot.rotation.y += dt * 0.045;
-      moonOrbitLine.visible = showMarkers;
-      miniOrbitLine.visible = showMarkers;
+      moonOrbitLine.visible = true;
+      miniOrbitLine.visible = true;
       hillLine.visible = showMarkers;
+      if (moonOrbitMat) moonOrbitMat.opacity = showMarkers ? 0.56 : 0.28;
+      if (miniOrbitMat) miniOrbitMat.opacity = showMarkers ? 0.52 : 0.24;
+      if (hillOrbitMat) hillOrbitMat.opacity = 0.34;
     };
   }
 
@@ -2646,7 +2653,8 @@ export class SeamlessUniverseSimulator {
         const b = a + 1;
         const c = a + vertsPerAxis;
         const d = c + 1;
-        indices.push(a, c, b, b, c, d);
+        // Counter-clockwise outward triangle winding ((b - a) x (c - a) = tangentU x tangentV = +centerDir)
+        indices.push(a, b, c, b, d, c);
       }
     }
 
@@ -2730,7 +2738,7 @@ export class SeamlessUniverseSimulator {
     this.planetaryRingMesh = ringMesh;
 
     // 5. Distant Orbital Pale-Blue-Dot Glint (visible when zoomed out to 8.85 Planetary System)
-    const orbitalGlint = this.createSinglePointGlint(0x38bdf8, 11.0, 0.48);
+    const orbitalGlint = this.createSinglePointGlint(0x38bdf8, 17.5, 0.72);
     orbitalGlint.visible = false;
     globeContainer.add(orbitalGlint);
     this.planetOrbitalGlint = orbitalGlint;
@@ -2864,59 +2872,61 @@ export class SeamlessUniverseSimulator {
   }
 
   // --- 15. FOREST & WETLAND ECOSYSTEMS (+2.2 · 160 m) ---
+  // Outer coastal islet pine clusters framing the real 5-district archipelago without overlapping Sanctuary center
   private populateEcosystemsLayer(
     group: THREE.Group
   ): (dt: number, elapsed: number) => void {
     this.ecosystemMeadowMat = new THREE.MeshStandardMaterial({
-      color: 0x14532d,
-      roughness: 0.9,
+      color: 0x166534,
+      roughness: 0.86,
     });
-    const meadow = new THREE.Mesh(
-      new THREE.CircleGeometry(23, 48),
-      this.ecosystemMeadowMat
-    );
-    meadow.rotation.x = -Math.PI / 2;
-    meadow.position.y = -0.35;
-    group.add(meadow);
-
     this.ecosystemRiverMat = new THREE.MeshStandardMaterial({
       color: 0x0284c7,
-      roughness: 0.18,
-      metalness: 0.25,
-      side: THREE.DoubleSide,
-      opacity: 0.88,
+      roughness: 0.22,
+      metalness: 0.2,
     });
-    const river = new THREE.Mesh(
-      new THREE.RingGeometry(5.2, 6.6, 48),
-      this.ecosystemRiverMat
-    );
-    river.rotation.x = -Math.PI / 2;
-    river.position.y = -0.30;
-    group.add(river);
 
-    const treeCount = this.isSoftwareGl ? 56 : 140;
-    const crownGeo = new THREE.DodecahedronGeometry(1.05, 1);
-    const crownMat = new THREE.MeshStandardMaterial({
-      color: 0x15803d,
-      roughness: 0.82,
+    const isletTrunkGeo = new THREE.CylinderGeometry(0.18, 0.3, 1.4, 7);
+    const isletTrunkMat = new THREE.MeshStandardMaterial({
+      color: 0x5c3a21,
+      roughness: 0.9,
     });
-    const canopy = new THREE.InstancedMesh(crownGeo, crownMat, treeCount);
-    for (let i = 0; i < treeCount; i++) {
-      const ang = seededRand(i * 3 + 1) * Math.PI * 2;
-      const r = 2.8 + seededRand(i * 3 + 2) * 18.2;
-      const s = 0.72 + seededRand(i * 3 + 3) * 0.95;
-      _dummyObj.position.set(Math.cos(ang) * r, -0.35 + 0.95 * s, Math.sin(ang) * r);
-      _dummyObj.scale.set(s * 1.15, s * 0.92, s * 1.1);
-      _dummyObj.rotation.y = ang;
+    const isletCrownGeo = new THREE.ConeGeometry(1.1, 2.5, 7);
+    const count = this.isSoftwareGl ? 36 : 72;
+    const trunks = new THREE.InstancedMesh(isletTrunkGeo, isletTrunkMat, count);
+    const crowns = new THREE.InstancedMesh(isletCrownGeo, this.ecosystemMeadowMat, count);
+
+    for (let i = 0; i < count; i++) {
+      // Cluster along outer perimeter outside Sanctuary central meadow (skip causeway diagonals)
+      const ang = (i / count) * Math.PI * 2 + 0.14;
+      const diag = Math.abs(Math.sin(ang * 2));
+      const r = diag > 0.78 ? 44 + (i % 4) * 3.5 : 32 + (i % 5) * 4.2;
+      const s = 0.75 + seededRand(i * 5 + 2) * 0.65;
+      const wx = Math.cos(ang) * r;
+      const wz = Math.sin(ang) * r;
+
+      _dummyObj.position.set(wx, 0.65 * s, wz);
+      _dummyObj.scale.set(s, s, s);
+      _dummyObj.rotation.set(0, ang, 0);
       _dummyObj.updateMatrix();
-      canopy.setMatrixAt(i, _dummyObj.matrix);
+      trunks.setMatrixAt(i, _dummyObj.matrix);
+
+      _dummyObj.position.set(wx, 2.05 * s, wz);
+      _dummyObj.scale.set(s * 1.05, s * 1.15, s * 1.05);
+      _dummyObj.updateMatrix();
+      crowns.setMatrixAt(i, _dummyObj.matrix);
+
       _scratchColorA.setHex(
-        i % 6 === 0 ? 0x4d7c0f : i % 9 === 0 ? 0xb45309 : 0x166534
+        i % 5 === 0 ? 0x15803d : i % 7 === 0 ? 0x22c55e : 0x166534
       );
-      canopy.setColorAt(i, _scratchColorA);
+      crowns.setColorAt(i, _scratchColorA);
     }
-    if (canopy.instanceColor) canopy.instanceColor.needsUpdate = true;
-    group.add(canopy);
+    trunks.instanceMatrix.needsUpdate = true;
+    crowns.instanceMatrix.needsUpdate = true;
+    if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
+    trunks.computeBoundingSphere();
+    crowns.computeBoundingSphere();
+    group.add(trunks, crowns);
 
     return () => {};
   }
@@ -2957,58 +2967,84 @@ export class SeamlessUniverseSimulator {
   private populateLeafAndFurMicroLayer(
     group: THREE.Group
   ): (dt: number, elapsed: number) => void {
+    const leafGroup = new THREE.Group();
+    leafGroup.rotation.x = -0.46;
+    group.add(leafGroup);
+
+    // Sculpted ovate citrus leaf silhouette instead of a flat square plane
+    const leafShape = new THREE.Shape();
+    leafShape.moveTo(-12.5, 0);
+    leafShape.bezierCurveTo(-9.5, 6.2, -1.8, 7.8, 5.5, 5.2);
+    leafShape.bezierCurveTo(9.8, 3.4, 12.2, 1.1, 13.6, 0);
+    leafShape.bezierCurveTo(12.2, -1.1, 9.8, -3.4, 5.5, -5.2);
+    leafShape.bezierCurveTo(-1.8, -7.8, -9.5, -6.2, -12.5, 0);
+
+    const leafGeo = new THREE.ShapeGeometry(leafShape, 24);
+    const posAttr = leafGeo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < posAttr.count; i++) {
+      const lx = posAttr.getX(i);
+      const ly = posAttr.getY(i);
+      // Natural midrib trough + gentle longitudinal botanical arch
+      const arch = -0.022 * lx * lx + Math.abs(ly) * 0.16;
+      posAttr.setZ(i, arch);
+    }
+    leafGeo.computeVertexNormals();
+
     const leafBlade = new THREE.Mesh(
-      new THREE.PlaneGeometry(26, 16, 24, 16),
+      leafGeo,
       new THREE.MeshStandardMaterial({
-        color: 0x15803d,
+        color: 0x16a34a,
         emissive: 0x052e16,
-        emissiveIntensity: 0.38,
+        emissiveIntensity: 0.32,
         side: THREE.DoubleSide,
-        roughness: 0.48,
-        opacity: 0.88,
+        roughness: 0.34,
+        metalness: 0.06,
       })
     );
-    leafBlade.rotation.x = -0.55;
-    group.add(leafBlade);
+    leafGroup.add(leafBlade);
 
+    // Petiole stem + primary vascular midrib + branching lateral venation
     const veinMat = new THREE.MeshStandardMaterial({
-      color: 0xa3e635,
+      color: 0xbef264,
       emissive: 0x3f6212,
-      emissiveIntensity: 0.35,
-      roughness: 0.4,
+      emissiveIntensity: 0.34,
+      roughness: 0.42,
     });
-    const midrib = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.28, 25.0, 10), veinMat);
+    const midrib = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.28, 26.8, 10), veinMat);
     midrib.rotation.z = Math.PI / 2;
-    midrib.position.z = 0.08;
+    midrib.position.set(-0.2, 0, -0.35);
     leafBlade.add(midrib);
 
-    for (let v = -5; v <= 5; v++) {
+    for (let v = -4; v <= 4; v++) {
+      const xOff = v * 2.15;
+      const halfSpan = Math.max(1.2, 5.8 * Math.sqrt(Math.max(0.08, 1 - (xOff / 12.8) * (xOff / 12.8))));
       for (const side of [-1, 1]) {
         const subVein = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.05, 0.10, 7.6, 8),
+          new THREE.CylinderGeometry(0.035, 0.085, halfSpan, 7),
           veinMat
         );
-        subVein.position.set(v * 2.1, side * 3.2, 0.08);
-        subVein.rotation.z = side * -0.68;
+        subVein.position.set(xOff + 0.85, side * (halfSpan * 0.44), 0.12);
+        subVein.rotation.z = side * -0.62;
         leafBlade.add(subVein);
       }
     }
 
+    // Fine tapered keratin fur bristles resting naturally beside the leaf apex rather than skewering through it
     const hairMat = new THREE.MeshStandardMaterial({
-      color: 0x92400e,
-      roughness: 0.36,
-      metalness: 0.18,
+      color: 0xb45309,
+      roughness: 0.4,
+      metalness: 0.12,
     });
-    for (let h = 0; h < 10; h++) {
-      const hair = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.32, 24, 10), hairMat);
-      hair.position.set((h - 4.5) * 2.6, 4.2 + (h % 2) * 1.8, -3.5 + (h % 3) * 2.2);
-      hair.rotation.z = 0.52 + (h % 3) * 0.08;
-      hair.rotation.x = 0.25;
+    for (let h = 0; h < 8; h++) {
+      const hair = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.24, 15.5, 10), hairMat);
+      hair.position.set(-7.5 + h * 2.1, 7.6 + (h % 2) * 1.1, -3.6 + (h % 3) * 1.4);
+      hair.rotation.z = 0.38 + (h % 3) * 0.06;
+      hair.rotation.x = 0.22;
       group.add(hair);
     }
 
     return (_dt, elapsed) => {
-      leafBlade.rotation.z = Math.sin(elapsed * 0.8) * 0.03;
+      leafGroup.rotation.z = Math.sin(elapsed * 0.8) * 0.03;
     };
   }
 
@@ -3678,18 +3714,29 @@ export class SeamlessUniverseSimulator {
     const gridGeo = new THREE.PlaneGeometry(36, 36, segs, segs);
     gridGeo.rotateX(-Math.PI / 2);
     this.planckFoamGridGeo = gridGeo;
-    this.planckFoamBaseZ = new Float32Array(gridGeo.attributes.position.count * 2);
-    for (let i = 0; i < gridGeo.attributes.position.count; i++) {
-      this.planckFoamBaseZ[i * 2] = gridGeo.attributes.position.getX(i);
-      this.planckFoamBaseZ[i * 2 + 1] = gridGeo.attributes.position.getZ(i);
+    const vCount = gridGeo.attributes.position.count;
+    this.planckFoamBaseZ = new Float32Array(vCount * 2);
+    const vColors = new Float32Array(vCount * 3);
+    for (let i = 0; i < vCount; i++) {
+      const vx = gridGeo.attributes.position.getX(i);
+      const vz = gridGeo.attributes.position.getZ(i);
+      this.planckFoamBaseZ[i * 2] = vx;
+      this.planckFoamBaseZ[i * 2 + 1] = vz;
+      // Radial perimeter falloff so additive wireframe grid fades smoothly into deep quantum vacuum
+      const r = Math.hypot(vx, vz);
+      const falloff = 1.0 - smoothstep01(7.0, 17.5, r);
+      vColors[i * 3] = 0.52 * falloff;
+      vColors[i * 3 + 1] = 0.56 * falloff;
+      vColors[i * 3 + 2] = 1.0 * falloff;
     }
+    gridGeo.setAttribute('color', new THREE.BufferAttribute(vColors, 3));
 
     const foamMesh = new THREE.Mesh(
       gridGeo,
       new THREE.MeshBasicMaterial({
-        color: 0x818cf8,
+        vertexColors: true,
         wireframe: true,
-        opacity: 0.42,
+        opacity: 0.48,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
@@ -3962,20 +4009,24 @@ export class SeamlessUniverseSimulator {
       const isNebulas = layer.spec.id === 'nebulas';
       const isPlanetarySystem = layer.spec.id === 'planetary_system';
       const isPlanet = layer.spec.id === 'planet';
+      const isDna = layer.spec.id === 'dna_molecules';
 
       let maxExpandDex = 1.45;
       if (isGalaxy) {
         // Unified Milky Way Galaxy + Spiral Arms stays continuous from Galaxy overview (21.0)
-        // through Spiral Arms (19.4) and hands off seamlessly to Nebulas (17.2).
-        maxExpandDex = 4.35;
+        // through Spiral Arms (19.4) and dissolves cleanly above Nebulas (17.2).
+        maxExpandDex = 3.55;
       } else if (isStellarSystems) {
         maxExpandDex = 4.45;
       } else if (isNebulas) {
-        maxExpandDex = 4.65;
+        maxExpandDex = 3.55;
       } else if (isPlanetarySystem) {
         maxExpandDex = 1.65;
       } else if (isPlanet) {
         maxExpandDex = 6.50;
+      } else if (isDna) {
+        // Dissolve DNA double-helix cleanly before reaching Carbon-12 electron orbitals (-9.47)
+        maxExpandDex = 0.85;
       }
 
       let maxShrinkDex = -2.35;
@@ -4107,10 +4158,14 @@ export class SeamlessUniverseSimulator {
           1.0,
           smoothstep01(20.85, 19.55, logScaleMeters)
         );
+        const ribbonHorizonFade = smoothstep01(17.7, 18.85, logScaleMeters);
         for (let r = 0; r < this.spiralGalaxyArmRibbons.length; r++) {
-          const rMat = this.spiralGalaxyArmRibbons[r].material as THREE.ShaderMaterial;
+          const rMesh = this.spiralGalaxyArmRibbons[r];
+          const rOp = 0.62 * alpha * ribbonScale * ribbonHorizonFade;
+          rMesh.visible = rOp > 0.008;
+          const rMat = rMesh.material as THREE.ShaderMaterial;
           if (rMat.uniforms?.uOpacity) {
-            rMat.uniforms.uOpacity.value = 0.62 * alpha * ribbonScale;
+            rMat.uniforms.uOpacity.value = rOp;
           }
         }
       }

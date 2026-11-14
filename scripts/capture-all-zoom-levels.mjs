@@ -13,6 +13,8 @@ const ZOOM_GALLERY_DIRS = [
   path.resolve('docs/gallery/zoom_levels'),
 ];
 
+const ZOOM_THUMB_DIR = path.resolve('public/assets/zoom_thumbs');
+
 const ALL_SCALE_BANDS = [
   'multiverse',
   'big_bang',
@@ -51,6 +53,7 @@ function ensureCleanDirs() {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(dir, { recursive: true });
   }
+  fs.mkdirSync(ZOOM_THUMB_DIR, { recursive: true });
   try {
     if (ARTIFACT_DIR) fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
   } catch {
@@ -91,8 +94,16 @@ async function captureCdpPng(cdp) {
 (async () => {
   ensureCleanDirs();
   console.log('Launching Playwright to capture all 25 zoom levels + 5 playable sectors...');
+  const defaultExec = chromium.executablePath();
+  const fallbackExec = '/ms-playwright/chrome-headless-shell-linux64/chrome-headless-shell';
+  const executablePath = fs.existsSync(defaultExec)
+    ? undefined
+    : fs.existsSync(fallbackExec)
+      ? fallbackExec
+      : undefined;
   const browser = await chromium.launch({
     headless: true,
+    executablePath,
     args: [
       '--use-gl=angle',
       '--use-angle=swiftshader',
@@ -116,12 +127,13 @@ async function captureCdpPng(cdp) {
   });
   const cdp = await context.newCDPSession(page);
 
-  const url = BASE_URL.includes('?') ? `${BASE_URL}&app=game` : `${BASE_URL}?app=game`;
-  await page.goto(url, { waitUntil: 'networkidle' });
-  await page.getByTestId('unified-top-bar').waitFor({ state: 'visible', timeout: 10000 });
-  await page.waitForTimeout(160);
+  const url = BASE_URL.includes('?') ? `${BASE_URL}&app=game&advanced=1` : `${BASE_URL}?app=game&advanced=1`;
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.getByTestId('unified-top-bar').waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForFunction(() => Boolean(window.__capyManager), { timeout: 30000 });
+  await page.waitForTimeout(250);
 
-  // 1. Capture every single one of the 25 logarithmic zoom levels (+28 Big Bang -> +0.8 Forest -> -35 Planck)
+  // 1. Capture every single one of the 27 logarithmic zoom levels (+30 Multiverse -> +0.8 Forest -> -35 Planck)
   const capturedManifest = [];
   for (let i = 0; i < ALL_SCALE_BANDS.length; i++) {
     const bandId = ALL_SCALE_BANDS[i];
@@ -141,27 +153,62 @@ async function captureCdpPng(cdp) {
       mgr.setSeamlessLogScale(spec.logMeters, true);
       mgr.tick(0.05);
       mgr.tick(0.05, 0.06);
-      return mgr.getUniverseScaleTelemetry();
+
+      // Export compact 256x160 JPEG thumbnail directly from the WebGL canvas after render
+      let thumbBase64 = null;
+      const src = mgr.renderer?.domElement;
+      if (src && src.width > 0 && src.height > 0) {
+        const c = document.createElement('canvas');
+        c.width = 256;
+        c.height = 160;
+        const ctx = c.getContext('2d');
+        if (ctx) {
+          const targetAspect = 256 / 160;
+          const srcAspect = src.width / src.height;
+          let sx = 0;
+          let sy = 0;
+          let sw = src.width;
+          let sh = src.height;
+          if (srcAspect > targetAspect) {
+            sw = Math.round(src.height * targetAspect);
+            sx = Math.round((src.width - sw) * 0.5);
+          } else if (srcAspect < targetAspect) {
+            sh = Math.round(src.width / targetAspect);
+            sy = Math.round((src.height - sh) * 0.5);
+          }
+          ctx.drawImage(src, sx, sy, sw, sh, 0, 0, 256, 160);
+          thumbBase64 = c.toDataURL('image/jpeg', 0.82).replace(/^data:image\/jpeg;base64,/, '');
+        }
+      }
+
+      return {
+        telemetry: mgr.getUniverseScaleTelemetry(),
+        thumbBase64,
+      };
     }, bandId);
 
     await page.waitForTimeout(55);
+    const tInfo = meta?.telemetry;
     const idxStr = String(i + 1).padStart(2, '0');
-    const expVal = meta?.logScaleMeters ?? 0;
+    const expVal = tInfo?.logScaleMeters ?? 0;
     const expSlug = expVal >= 0 ? `pos${expVal}` : `neg${Math.abs(expVal)}`;
     const filename = `zoom_${idxStr}_${bandId}_10e_${expSlug}m.png`;
     const png = await captureCdpPng(cdp);
     saveToZoomGalleries(png, filename);
+    if (meta?.thumbBase64) {
+      fs.writeFileSync(path.join(ZOOM_THUMB_DIR, `${bandId}.jpg`), Buffer.from(meta.thumbBase64, 'base64'));
+    }
 
     capturedManifest.push({
       index: i + 1,
       bandId,
       filename,
-      scientificLabel: meta?.scientificLabel || '',
-      scaleFormatted: meta?.scaleFormatted || '',
-      bandTitle: meta?.bandTitle || bandId,
-      bandSubtitle: meta?.bandSubtitle || '',
+      scientificLabel: tInfo?.scientificLabel || '',
+      scaleFormatted: tInfo?.scaleFormatted || '',
+      bandTitle: tInfo?.bandTitle || bandId,
+      bandSubtitle: tInfo?.bandSubtitle || '',
     });
-    console.log(`Captured [${idxStr}/${ALL_SCALE_BANDS.length}] ${filename} (${meta?.scientificLabel} — ${meta?.bandTitle})`);
+    console.log(`Captured [${idxStr}/${ALL_SCALE_BANDS.length}] ${filename} (${tInfo?.scientificLabel} — ${tInfo?.bandTitle})`);
   }
 
   // 1B. Capture Exact Bug-Audit Scales (10^+13.7m / 326 AU & 10^+17.1m / 14.07 ly) + Unlockable Optics Showcases

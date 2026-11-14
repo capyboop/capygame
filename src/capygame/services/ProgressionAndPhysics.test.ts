@@ -1217,5 +1217,28 @@ test('ProgressionService JSON Save Portability: exports, validates, clamps, and 
   }
 });
 
+test('Basic vs Advanced Mode: defaults to kid-friendly Basic Mode (advancedMode=false) and persists Advanced Mode cleanly', () => {
+  assert.equal(DEFAULT_CAPY_SETTINGS.advancedMode, false);
+
+  const legacySanitized = ProgressionService.sanitizeGameSettings({ fov: 62 });
+  assert.equal(legacySanitized.advancedMode, false);
+  assert.equal(legacySanitized.fov, 62);
+
+  const advSanitized = ProgressionService.sanitizeGameSettings({ advancedMode: true });
+  assert.equal(advSanitized.advancedMode, true);
+
+  const bundle = ProgressionService.exportSaveBundleJson(
+    INITIAL_PLAYER_STATS,
+    { ...DEFAULT_CAPY_SETTINGS, advancedMode: true },
+    null
+  );
+  const imported = ProgressionService.parseAndValidateSaveBundle(bundle);
+  assert.equal(imported.ok, true);
+  if (imported.ok) {
+    assert.equal(imported.settings.advancedMode, true);
+  }
+});
+
+
 
 

@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import fs from 'fs';
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000/';
 
@@ -6,9 +7,17 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:3000/';
   console.log(
     'Launching Playwright E2E test for Capy Universe 3D (N-Body Galaxy Formation, Star Nucleosynthesis, High-Detail Dynamic 60 FPS Capybara LOD & Dachshund Capy-Snake)...'
   );
+  const defaultExec = chromium.executablePath();
+  const fallbackExec = '/ms-playwright/chrome-headless-shell-linux64/chrome-headless-shell';
+  const executablePath = fs.existsSync(defaultExec)
+    ? undefined
+    : fs.existsSync(fallbackExec)
+      ? fallbackExec
+      : undefined;
   const browser = await chromium.launch({
     headless: true,
-    args: ['--use-gl=angle', '--use-angle=swiftshader'],
+    executablePath,
+    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'],
   });
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -35,13 +44,66 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:3000/';
     }
   });
 
-  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
 
-  // 1. Verify Initial Load starts in Primordial Singularity stage with ALL controls in a single compact top line
+  // 0. Verify Default Kid-Friendly Basic Mode Launch (no auto-opening genesis modal, clean simplified top bar, single-column thumbnail zoom list)
   const canvasContainer = page.getByTestId('capygame-canvas-container');
-  await canvasContainer.waitFor({ state: 'visible', timeout: 10000 });
+  await canvasContainer.waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForFunction(() => Boolean(window.__capyManager), { timeout: 30000 });
 
   const unifiedTopBar = page.getByTestId('unified-top-bar');
+  await unifiedTopBar.waitFor({ state: 'visible', timeout: 5000 });
+  const initialUiMode = await unifiedTopBar.getAttribute('data-ui-mode');
+  if (initialUiMode !== 'basic') {
+    throw new Error(`Expected default startup UI mode to be 'basic', got '${initialUiMode}'`);
+  }
+  const startupSetupCount = await page.getByTestId('first-run-customizer').count();
+  if (startupSetupCount !== 0) {
+    throw new Error(`Expected zero blocking startup modals in Basic Mode, found first-run-customizer count=${startupSetupCount}`);
+  }
+  const basicOpticsCount = await page.getByTestId('toggle-optics-panel-btn').count();
+  const basicJsonCount = await page.getByTestId('open-json-editor-btn').count();
+  if (basicOpticsCount !== 0 || basicJsonCount !== 0) {
+    throw new Error(`Expected advanced buttons hidden in Basic Mode (optics=${basicOpticsCount}, json=${basicJsonCount})`);
+  }
+
+  // Open Zoom Explorer and verify single-column scrollable list of 27 zoom levels with real thumbnails
+  await page.getByTestId('toggle-scale-atlas-btn').click({ force: true });
+  const zoomList = page.getByTestId('zoom-levels-list');
+  await zoomList.waitFor({ state: 'visible', timeout: 5000 });
+  const listStats = await page.evaluate(() => {
+    const list = document.querySelector('[data-testid="zoom-levels-list"]');
+    if (!list) return null;
+    const buttons = Array.from(list.querySelectorAll('button'));
+    const rects = buttons.map((b) => b.getBoundingClientRect());
+    const singleColumn = rects.every((r, idx) => idx === 0 || r.top > rects[idx - 1].top + 10);
+    const thumbCount = list.querySelectorAll('img').length;
+    return {
+      count: buttons.length,
+      thumbCount,
+      singleColumn,
+      scrollable: list.scrollHeight > list.clientHeight,
+    };
+  });
+  if (!listStats || listStats.count !== 27 || listStats.thumbCount !== 27 || !listStats.singleColumn || !listStats.scrollable) {
+    throw new Error(`Expected 27 single-column scrollable zoom tiles with thumbnails, got ${JSON.stringify(listStats)}`);
+  }
+  await page.getByTestId('close-scale-atlas-btn').click({ force: true });
+
+  // Open Settings and verify Basic -> Advanced Mode toggle works cleanly
+  await page.getByTestId('open-settings-btn').click({ force: true });
+  await page.getByTestId('settings-mode-panel').waitFor({ state: 'visible', timeout: 4000 });
+  await page.getByTestId('settings-mode-advanced-btn').click({ force: true });
+  await page.waitForTimeout(120);
+  if ((await unifiedTopBar.getAttribute('data-ui-mode')) !== 'advanced') {
+    throw new Error('Expected switching to Advanced Mode in Settings to enable data-ui-mode="advanced"');
+  }
+  await page.getByTestId('close-settings-btn').click({ force: true });
+
+  // Reload in clean Advanced Mode (?advanced=1) to verify deep scientific, physics & HUD telemetry suite
+  const advUrl = BASE_URL.includes('?') ? `${BASE_URL}&advanced=1` : `${BASE_URL}?advanced=1`;
+  await page.goto(advUrl, { waitUntil: 'networkidle' });
+  await canvasContainer.waitFor({ state: 'visible', timeout: 10000 });
   await unifiedTopBar.waitFor({ state: 'visible', timeout: 5000 });
   const topBarBox = await unifiedTopBar.boundingBox();
   if (!topBarBox || topBarBox.y !== 0 || topBarBox.height > 44) {
@@ -1834,7 +1896,7 @@ const BASE_URL = process.env.BASE_URL || 'http://localhost:3000/';
   await Promise.race([browser.close(), new Promise((r) => setTimeout(r, 1500))]);
 
   // 15. Verify Meaningful Error Messages when WebGL or App Errors occur in a clean lightweight browser instance
-  const errBrowser = await chromium.launch({ headless: true });
+  const errBrowser = await chromium.launch({ headless: true, executablePath });
   const errPage = await errBrowser.newPage({ viewport: { width: 390, height: 844 } });
   await errPage.goto(`${BASE_URL}?simulate_webgl_error=1`, { waitUntil: 'domcontentloaded' });
   const webglErr = errPage.getByTestId('capygame-webgl-error');

@@ -36,6 +36,7 @@ import {
   REALITY_RESCALER_COIN_COST,
   REALITY_RESCALER_DNA_COST,
   UNIVERSE_SCALE_BANDS,
+  UniverseScaleBandId,
   UniverseScaleTelemetry,
   WeatherType,
   formatPhysicalScaleMeters,
@@ -206,34 +207,70 @@ const ABILITY_UPGRADE_LIST: Array<{
 const WARDROBE_HATS: Array<{
   id: string;
   name: string;
+  kidName: string;
   description: string;
 }> = [
   {
     id: 'yuzu',
     name: 'Citrus Crest',
-    description: ' minimal botanical crest.',
+    kidName: 'Yuzu Orange',
+    description: 'Signature orange balanced on head.',
   },
   {
     id: 'crown',
     name: 'Gold Diadem',
-    description: 'Geometric metallic crown.',
+    kidName: 'Gold Crown',
+    description: 'Shiny royal capybara crown.',
   },
   {
     id: 'flower',
     name: 'Flora Emblem',
-    description: 'Botanical surface specimen.',
+    kidName: 'Daisy Flower',
+    description: 'Cute garden flower hat.',
   },
   {
     id: 'wizard',
     name: 'Spire Cone',
-    description: 'Angular spire headgear.',
+    kidName: 'Wizard Hat',
+    description: 'Magical pointy wizard hat.',
   },
   {
     id: 'halo',
     name: 'Orbital Ring',
-    description: 'Suspended luminous ring.',
+    kidName: 'Glowing Halo',
+    description: 'Floating golden ring.',
   },
 ];
+
+const KID_FRIENDLY_BAND_DESCRIPTIONS: Record<UniverseScaleBandId, string> = {
+  multiverse: 'Floating bubbles of different universes in deep space.',
+  big_bang: 'The bright flash where stars and space first began.',
+  universe: 'Billions of shining galaxies stretching everywhere.',
+  observable: 'Everything we can see across the whole cosmos.',
+  cosmic_web: 'Giant glowing webs of galaxies connected together.',
+  filament: 'Long sparkling bridges made of thousands of galaxies.',
+  supercluster: 'Huge neighborhoods packed with galaxy clusters.',
+  cluster: 'Hundreds of giant galaxies dancing near each other.',
+  galaxy: 'Our spinning Milky Way spiral full of billions of stars.',
+  spiral_arms: 'Bright blue arms of newborn stars and glowing dust.',
+  nebulas: 'Colorful space clouds where brand new stars are born.',
+  stellar_systems: 'A bright star with planets circling around it.',
+  planetary_system: 'Capybara Earth with its Moon orbiting nearby.',
+  planet: 'Our big blue marble of oceans, clouds, and green land.',
+  atmosphere: 'Soft blue sky layers and fluffy clouds above Earth.',
+  land_masses: 'Wide green continents surrounded by sparkling blue seas.',
+  ecosystems: 'A peaceful tropical island bay surrounded by mountains.',
+  capybara_forest: 'Walk, swim, bounce, and collect oranges with Capybara!',
+  leaf_fur_micro: 'Super close look at fuzzy golden fur and green leaves.',
+  biological_cells: 'Tiny living cells working inside every plant and animal.',
+  dna_molecules: 'Twisting rainbow spirals that hold life instructions.',
+  atomic_orbitals: 'Spinning cloud shells of energy around an atom.',
+  atomic_nucleus: 'The super tiny, dense core right inside an atom.',
+  quarks_gluons: 'Three colorful building blocks zipped inside protons.',
+  single_electron: 'One zippy glowing particle zooming around atoms.',
+  single_photon: 'A tiny twinkling wave of pure sunlight.',
+  planck_quantum_foam: 'The smallest buzzing grid at the bottom of space.',
+};
 
 interface TouchDragVisualState {
   active: boolean;
@@ -250,9 +287,21 @@ export const CapyGameView: React.FC = () => {
   const [stats, setStats] = useState<PlayerStats>(() =>
     ProgressionService.loadStats(true)
   );
-  const [gameSettings, setGameSettings] = useState<CapyGameSettings>(() =>
-    ProgressionService.loadSettings()
-  );
+  const [gameSettings, setGameSettings] = useState<CapyGameSettings>(() => {
+    const loaded = ProgressionService.loadSettings();
+    try {
+      if (
+        typeof window !== 'undefined' &&
+        new URLSearchParams(window.location.search).get('advanced') === '1'
+      ) {
+        return { ...loaded, advancedMode: true };
+      }
+    } catch {
+      // ignore URL parsing errors
+    }
+    return loaded;
+  });
+  const isAdvancedMode = Boolean(gameSettings.advancedMode);
   const gameSettingsRef = useRef<CapyGameSettings>(gameSettings);
   gameSettingsRef.current = gameSettings;
   const [isFreeMouselook, setIsFreeMouselook] = useState<boolean>(false);
@@ -281,14 +330,14 @@ export const CapyGameView: React.FC = () => {
     try {
       if (
         typeof window !== 'undefined' &&
-        new URLSearchParams(window.location.search).get('skip_cosmic') === '1'
+        new URLSearchParams(window.location.search).get('open_setup') === '1'
       ) {
-        return false;
+        return true;
       }
     } catch {
       // ignore
     }
-    return !hasCompletedFirstRunSetup();
+    return false;
   });
   const [firstRunTab, setFirstRunTab] = useState<'pilot' | 'vessel' | 'universe'>('pilot');
   const firstRunSetupOpenRef = useRef<boolean>(isFirstRunSetupOpen);
@@ -508,6 +557,9 @@ export const CapyGameView: React.FC = () => {
 
   const [isScaleAtlasOpen, setIsScaleAtlasOpen] = useState<boolean>(false);
   const [isOpticsOpen, setIsOpticsOpen] = useState<boolean>(false);
+  const [liveZoomThumbnails, setLiveZoomThumbnails] = useState<
+    Partial<Record<UniverseScaleBandId, string>>
+  >({});
   const [universeScale, setUniverseScale] = useState<UniverseScaleTelemetry>(() => ({
     active: false,
     logScaleMeters: 30.0,
@@ -882,6 +934,14 @@ export const CapyGameView: React.FC = () => {
         },
         onOrbitTelemetryChange: (telemetry: OrbitTelemetry) => {
           setOrbitTelemetry(telemetry);
+        },
+        onZoomThumbnailUpdated: (bandId: UniverseScaleBandId, dataUrl: string) => {
+          setLiveZoomThumbnails((prev) =>
+            prev[bandId] === dataUrl ? prev : { ...prev, [bandId]: dataUrl }
+          );
+        },
+        onZoomThumbnailsReset: () => {
+          setLiveZoomThumbnails({});
         },
       },
       webGpuInit
@@ -2252,25 +2312,26 @@ export const CapyGameView: React.FC = () => {
          ===================================================================== */}
       <nav
         data-testid="unified-top-bar"
+        data-ui-mode={isAdvancedMode ? 'advanced' : 'basic'}
         aria-label="Universe Simulator Controls and Status"
-        className="fixed top-0 inset-x-0 z-30 h-10 bg-zinc-950/95 border-b border-white/12 px-1 sm:px-2.5 flex items-center justify-between gap-0.5 sm:gap-2 pointer-events-auto whitespace-nowrap"
+        className="fixed top-0 inset-x-0 z-30 h-10 bg-zinc-950/95 border-b border-white/12 px-1.5 sm:px-2.5 flex items-center justify-between gap-1 sm:gap-2 pointer-events-auto whitespace-nowrap"
       >
-        {/* LEFT CLUSTER: Continuous 63-Order Scale & Step Zoom Controls */}
+        {/* LEFT CLUSTER: Zoom Controls */}
         <div
           data-testid="universe-scale-hud"
           data-scale-band={universeScale.bandId}
           data-seamless-active={universeScale.active ? 'true' : 'false'}
-          className="flex items-center gap-0.5 sm:gap-1 shrink-0"
+          className="flex items-center gap-1 shrink-0"
         >
           <button
             type="button"
             data-testid="scale-zoom-out-btn"
             onClick={() => managerRef.current?.stepScaleBand(1)}
-            title="Zoom Out 1 Scale Band (Toward Big Bang 10^+28m)"
+            title={isAdvancedMode ? 'Zoom Out 1 Scale Band (Toward Big Bang 10^+28m)' : 'Zoom Out'}
             aria-label="Zoom Out Scale"
-            className="w-5 h-6 sm:w-6 sm:h-7 flex items-center justify-center rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-white/10 cursor-pointer shrink-0"
+            className={`${isAdvancedMode ? 'w-5 h-6 sm:w-6 sm:h-7' : 'w-7 h-7'} flex items-center justify-center rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-white/10 cursor-pointer shrink-0`}
           >
-            <Minus className="w-3 h-3" />
+            <Minus className="w-3.5 h-3.5" />
           </button>
 
           <button
@@ -2285,27 +2346,36 @@ export const CapyGameView: React.FC = () => {
                   setIsOpticsOpen(false);
                   setIsInfographicExpanded(false);
                   setIsMenuOpen(false);
+                  managerRef.current?.requestCurrentBandThumbnail();
                 }
                 return next;
               });
             }}
-            title="Open 63-Orders-of-Magnitude Universe Scale Scrubber (Big Bang to Photon)"
-            className={`h-6 sm:h-7 px-1 sm:px-2 rounded border flex items-center gap-0.5 sm:gap-1 text-left transition-colors cursor-pointer ${
+            title={isAdvancedMode ? 'Open 63-Orders-of-Magnitude Universe Scale Scrubber' : 'Choose Zoom Level'}
+            className={`${isAdvancedMode ? 'h-6 sm:h-7 px-1 sm:px-2' : 'h-7 px-2'} rounded border flex items-center gap-1 text-left transition-colors cursor-pointer ${
               isScaleAtlasOpen
                 ? 'bg-sky-500/20 border-sky-400/60 text-zinc-100'
                 : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-zinc-100'
             }`}
           >
-            <span
-              data-testid="compact-scale-exponent"
-              className="text-[10px] font-mono tabular-nums text-sky-400 font-semibold"
-            >
-              {universeScale.scientificLabel}
-            </span>
-            <span className="hidden sm:inline text-zinc-600 text-[10px]">·</span>
-            <span className="hidden sm:inline text-[11px] font-medium text-zinc-200 max-w-[116px] lg:max-w-[155px] truncate">
-              {UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || 'Scale'}
-            </span>
+            {isAdvancedMode ? (
+              <>
+                <span
+                  data-testid="compact-scale-exponent"
+                  className="text-[10px] font-mono tabular-nums text-sky-400 font-semibold"
+                >
+                  {universeScale.scientificLabel}
+                </span>
+                <span className="hidden sm:inline text-zinc-600 text-[10px]">·</span>
+                <span className="hidden sm:inline text-[11px] font-medium text-zinc-200 max-w-[116px] lg:max-w-[155px] truncate">
+                  {UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || 'Scale'}
+                </span>
+              </>
+            ) : (
+              <span className="text-[11px] font-medium text-zinc-100 max-w-[96px] sm:max-w-[150px] truncate">
+                {UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || 'Zoom'}
+              </span>
+            )}
             <ChevronDown
               className={`w-3 h-3 text-zinc-400 shrink-0 transition-transform ${
                 isScaleAtlasOpen ? 'rotate-180 text-sky-400' : ''
@@ -2313,65 +2383,69 @@ export const CapyGameView: React.FC = () => {
             />
           </button>
 
-          <input
-            type="range"
-            min={MIN_UNIVERSE_LOG_METERS}
-            max={MAX_UNIVERSE_LOG_METERS}
-            step={0.05}
-            value={universeScale.targetLogScaleMeters}
-            onChange={(e) => {
-              managerRef.current?.setSeamlessLogScale(parseFloat(e.target.value), false);
-            }}
-            aria-label="Inline Universe Scale Slider"
-            title={`Scale: ${universeScale.scientificLabel} (${universeScale.bandTitle})`}
-            className="hidden xl:block w-24 accent-sky-400 cursor-pointer h-1 bg-zinc-800 rounded-lg mx-0.5"
-          />
+          {isAdvancedMode && (
+            <input
+              type="range"
+              min={MIN_UNIVERSE_LOG_METERS}
+              max={MAX_UNIVERSE_LOG_METERS}
+              step={0.05}
+              value={universeScale.targetLogScaleMeters}
+              onChange={(e) => {
+                managerRef.current?.setSeamlessLogScale(parseFloat(e.target.value), false);
+              }}
+              aria-label="Inline Universe Scale Slider"
+              title={`Scale: ${universeScale.scientificLabel} (${universeScale.bandTitle})`}
+              className="hidden xl:block w-24 accent-sky-400 cursor-pointer h-1 bg-zinc-800 rounded-lg mx-0.5"
+            />
+          )}
 
           <button
             type="button"
             data-testid="scale-zoom-in-btn"
             onClick={() => managerRef.current?.stepScaleBand(-1)}
-            title="Zoom In 1 Scale Band (Toward Electron & Photon 10^-35m)"
+            title={isAdvancedMode ? 'Zoom In 1 Scale Band (Toward Electron & Photon 10^-35m)' : 'Zoom In'}
             aria-label="Zoom In Scale"
-            className="w-5 h-6 sm:w-6 sm:h-7 flex items-center justify-center rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-white/10 cursor-pointer shrink-0"
+            className={`${isAdvancedMode ? 'w-5 h-6 sm:w-6 sm:h-7' : 'w-7 h-7'} flex items-center justify-center rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-white/10 cursor-pointer shrink-0`}
           >
-            <Plus className="w-3 h-3" />
+            <Plus className="w-3.5 h-3.5" />
           </button>
 
-          <button
-            type="button"
-            data-testid="toggle-optics-panel-btn"
-            aria-expanded={isOpticsOpen}
-            onClick={() => {
-              AudioService.playCoin();
-              setIsOpticsOpen((prev) => {
-                const next = !prev;
-                if (next) {
-                  setIsScaleAtlasOpen(false);
-                  setIsInfographicExpanded(false);
-                  setIsMenuOpen(false);
-                }
-                return next;
-              });
-            }}
-            title="Cosmic Optics: 1:1 Physical Scale, Object Finder Markers & Reality Rescaler"
-            className={`h-6 sm:h-7 px-1 sm:px-1.5 rounded border flex items-center gap-0.5 sm:gap-1 text-[9px] sm:text-[10px] font-mono tabular-nums transition-colors cursor-pointer shrink-0 ${
-              isOpticsOpen || universeScale.showObjectMarkers || universeScale.realityScaleGamma < 0.99
-                ? 'bg-sky-500/20 border-sky-400/60 text-sky-200'
-                : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-zinc-300'
-            }`}
-          >
-            <Crosshair className="w-3 h-3 text-sky-400 shrink-0" />
-            <span data-testid="compact-scale-ratio-badge">
-              {universeScale.realityScaleGamma >= 0.99
-                ? '1:1'
-                : `γ${universeScale.realityScaleGamma.toFixed(2)}`}
-              {universeScale.showObjectMarkers ? '·M' : ''}
-            </span>
-          </button>
+          {isAdvancedMode && (
+            <button
+              type="button"
+              data-testid="toggle-optics-panel-btn"
+              aria-expanded={isOpticsOpen}
+              onClick={() => {
+                AudioService.playCoin();
+                setIsOpticsOpen((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    setIsScaleAtlasOpen(false);
+                    setIsInfographicExpanded(false);
+                    setIsMenuOpen(false);
+                  }
+                  return next;
+                });
+              }}
+              title="Cosmic Optics: 1:1 Physical Scale, Object Finder Markers & Reality Rescaler"
+              className={`h-6 sm:h-7 px-1 sm:px-1.5 rounded border flex items-center gap-0.5 sm:gap-1 text-[9px] sm:text-[10px] font-mono tabular-nums transition-colors cursor-pointer shrink-0 ${
+                isOpticsOpen || universeScale.showObjectMarkers || universeScale.realityScaleGamma < 0.99
+                  ? 'bg-sky-500/20 border-sky-400/60 text-sky-200'
+                  : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-zinc-300'
+              }`}
+            >
+              <Crosshair className="w-3 h-3 text-sky-400 shrink-0" />
+              <span data-testid="compact-scale-ratio-badge">
+                {universeScale.realityScaleGamma >= 0.99
+                  ? '1:1'
+                  : `γ${universeScale.realityScaleGamma.toFixed(2)}`}
+                {universeScale.showObjectMarkers ? '·M' : ''}
+              </span>
+            </button>
+          )}
         </div>
 
-        {/* CENTER CLUSTER: Single-Line Live Status, Placement Ghost & Info Dropdown Trigger */}
+        {/* CENTER CLUSTER: Live Status & Inspector Trigger */}
         <div className="flex-1 min-w-0 overflow-hidden flex items-center justify-center">
           {placementGhost.active ? (
             <div
@@ -2382,9 +2456,11 @@ export const CapyGameView: React.FC = () => {
               <span className="text-zinc-100 font-sans font-semibold truncate">
                 {placementGhost.name}
               </span>
-              <span className="hidden md:inline text-zinc-400 tabular-nums">
-                ({placementGhost.x.toFixed(1)}, {placementGhost.z.toFixed(1)})
-              </span>
+              {isAdvancedMode && (
+                <span className="hidden md:inline text-zinc-400 tabular-nums">
+                  ({placementGhost.x.toFixed(1)}, {placementGhost.z.toFixed(1)})
+                </span>
+              )}
               <span
                 data-testid="placement-ghost-validity"
                 className={
@@ -2393,7 +2469,7 @@ export const CapyGameView: React.FC = () => {
                     : 'text-rose-300 font-semibold shrink-0'
                 }
               >
-                {placementGhost.valid ? 'Clear · Tap' : 'Blocked'}
+                {placementGhost.valid ? (isAdvancedMode ? 'Clear · Tap' : 'Tap to Place') : 'Move Here'}
               </span>
               <button
                 type="button"
@@ -2427,8 +2503,8 @@ export const CapyGameView: React.FC = () => {
                     return next;
                   });
                 }}
-                title="Open Live Simulation, Cosmic & Capybara Inspector"
-                className={`h-6 sm:h-7 px-1 sm:px-2 rounded border flex items-center gap-1 sm:gap-1.5 min-w-0 max-w-full overflow-hidden text-[10px] sm:text-[11px] whitespace-nowrap transition-colors cursor-pointer ${
+                title={isAdvancedMode ? 'Open Live Simulation, Cosmic & Capybara Inspector' : 'Quick Actions'}
+                className={`${isAdvancedMode ? 'h-6 sm:h-7 px-1 sm:px-2 text-[10px] sm:text-[11px]' : 'h-7 px-2 text-[11px]'} rounded border flex items-center gap-1 sm:gap-1.5 min-w-0 max-w-full overflow-hidden whitespace-nowrap transition-colors cursor-pointer ${
                   isInfographicExpanded
                     ? 'bg-sky-500/20 border-sky-400/60 text-zinc-100'
                     : 'bg-zinc-900/90 hover:bg-zinc-800 border-white/10 text-zinc-200'
@@ -2436,6 +2512,30 @@ export const CapyGameView: React.FC = () => {
               >
                 {toastText ? (
                   <span className="font-mono text-[10px] text-sky-300 truncate min-w-0">{toastText}</span>
+                ) : !isAdvancedMode ? (
+                  cosmicStage === 'playing' && !universeScale.active ? (
+                    <span
+                      data-testid="capy-snake-hud"
+                      className="flex items-center gap-1.5 min-w-0 overflow-hidden whitespace-nowrap"
+                    >
+                      <span
+                        aria-hidden="true"
+                        style={{ backgroundColor: snakeTelemetry.headOrangeCss }}
+                        className="w-2.5 h-2.5 rounded-full border border-white/30 shrink-0"
+                      />
+                      <span className="font-medium text-zinc-100 truncate">
+                        {activeMode === 'sanctuary' ? 'Capy Island' : currentZone.title}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="font-medium text-zinc-100 truncate">
+                      {universeScale.active
+                        ? UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || 'Space'
+                        : cosmicStage === 'singularity'
+                          ? 'Play'
+                          : infographicTargetTitle}
+                    </span>
+                  )
                 ) : cosmicStage === 'playing' && !universeScale.active && activeMode === 'sanctuary' ? (
                   <span
                     data-testid="capy-snake-hud"
@@ -2499,9 +2599,9 @@ export const CapyGameView: React.FC = () => {
           )}
         </div>
 
-        {/* RIGHT CLUSTER: Compact Epoch/DNA/Coins Readout, JSON Config, World Dropdown, Settings, Overview & Audio */}
-        <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-          {universeScale.active && (
+        {/* RIGHT CLUSTER */}
+        <div className="flex items-center gap-1 shrink-0">
+          {isAdvancedMode && universeScale.active && (
             <div
               data-testid="top-bar-epoch-badge"
               className="hidden md:flex items-center gap-1 px-1.5 h-7 rounded bg-zinc-900/90 border border-cyan-400/25 text-[10px] font-mono tabular-nums text-cyan-300"
@@ -2510,31 +2610,35 @@ export const CapyGameView: React.FC = () => {
             </div>
           )}
 
-          <div className="hidden lg:flex items-center gap-1.5 px-2 h-7 rounded bg-zinc-900/75 border border-white/8 text-[10px] font-mono tabular-nums mr-0.5">
-            <span data-testid="stat-dna" className="text-emerald-300 font-semibold">
-              {stats.dna} DNA
-            </span>
-            <span className="text-zinc-600">·</span>
-            <span data-testid="stat-coins" className="text-amber-300 font-semibold">
-              {stats.coins ?? 0}c
-            </span>
-          </div>
+          {isAdvancedMode && (
+            <div className="hidden lg:flex items-center gap-1.5 px-2 h-7 rounded bg-zinc-900/75 border border-white/8 text-[10px] font-mono tabular-nums mr-0.5">
+              <span data-testid="stat-dna" className="text-emerald-300 font-semibold">
+                {stats.dna} DNA
+              </span>
+              <span className="text-zinc-600">·</span>
+              <span data-testid="stat-coins" className="text-amber-300 font-semibold">
+                {stats.coins ?? 0}c
+              </span>
+            </div>
+          )}
 
-          <button
-            type="button"
-            data-testid="open-json-editor-btn"
-            onClick={handleOpenJsonEditor}
-            title="Live Procedural JSON Engine Configurator"
-            aria-label="Open Procedural JSON Config Editor"
-            className={`h-6 sm:h-7 px-1 sm:px-2 rounded border flex items-center gap-1 text-[11px] font-mono transition-colors cursor-pointer ${
-              isJsonEditorOpen
-                ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-200'
-                : 'bg-zinc-900 hover:bg-zinc-800 border-cyan-400/25 text-cyan-300'
-            }`}
-          >
-            <Code2 className="w-3.5 h-3.5 shrink-0" />
-            <span className="hidden sm:inline">JSON</span>
-          </button>
+          {isAdvancedMode && (
+            <button
+              type="button"
+              data-testid="open-json-editor-btn"
+              onClick={handleOpenJsonEditor}
+              title="Live Procedural JSON Engine Configurator"
+              aria-label="Open Procedural JSON Config Editor"
+              className={`h-6 sm:h-7 px-1 sm:px-2 rounded border flex items-center gap-1 text-[11px] font-mono transition-colors cursor-pointer ${
+                isJsonEditorOpen
+                  ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-200'
+                  : 'bg-zinc-900 hover:bg-zinc-800 border-cyan-400/25 text-cyan-300'
+              }`}
+            >
+              <Code2 className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">JSON</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -2553,7 +2657,7 @@ export const CapyGameView: React.FC = () => {
             }}
             aria-expanded={isMenuOpen}
             aria-label={isMenuOpen ? 'Close World Menu' : 'Open World Menu'}
-            className={`h-6 sm:h-7 px-1.5 sm:px-2 rounded border flex items-center gap-1 text-xs font-medium transition-colors cursor-pointer ${
+            className={`${isAdvancedMode ? 'h-6 sm:h-7 px-1.5 sm:px-2' : 'h-7 px-2'} rounded border flex items-center gap-1 text-xs font-medium transition-colors cursor-pointer ${
               isMenuOpen
                 ? 'bg-sky-500/20 border-sky-400/60 text-zinc-100'
                 : 'bg-zinc-900 hover:bg-zinc-800 border-white/12 text-zinc-100'
@@ -2564,7 +2668,23 @@ export const CapyGameView: React.FC = () => {
             ) : (
               <Menu className="w-3.5 h-3.5 text-sky-400" />
             )}
-            <span className="hidden sm:inline">World</span>
+            <span className={isAdvancedMode ? 'hidden sm:inline' : 'inline'}>
+              {isAdvancedMode ? 'World' : 'Worlds'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleToggleMute}
+            title={isMuted ? 'Unmute Audio' : 'Mute Audio'}
+            aria-label={isMuted ? 'Unmute audio' : 'Mute audio'}
+            className={`${isAdvancedMode ? 'hidden sm:flex w-7 h-7' : 'flex w-7 h-7'} items-center justify-center rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/10 transition-colors cursor-pointer shrink-0`}
+          >
+            {isMuted ? (
+              <VolumeX className="w-3.5 h-3.5 text-rose-400" />
+            ) : (
+              <Volume2 className="w-3.5 h-3.5" />
+            )}
           </button>
 
           <button
@@ -2574,42 +2694,30 @@ export const CapyGameView: React.FC = () => {
               AudioService.playCoin();
               setIsSettingsOpen(true);
             }}
-            title="Simulation Settings"
-            aria-label="Open Simulation Settings"
-            className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/10 transition-colors cursor-pointer shrink-0"
+            title="Settings"
+            aria-label="Open Settings"
+            className={`${isAdvancedMode ? 'w-6 h-6 sm:w-7 sm:h-7' : 'w-7 h-7'} flex items-center justify-center rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/10 transition-colors cursor-pointer shrink-0`}
           >
             <SettingsIcon className="w-3.5 h-3.5" />
           </button>
 
-          <button
-            type="button"
-            data-testid="open-about-btn"
-            onClick={() => {
-              AudioService.playCoin();
-              setIsAboutOpen(true);
-            }}
-            title="Universe Architecture Overview"
-            aria-label="Open Overview"
-            className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/10 transition-colors cursor-pointer shrink-0"
-          >
-            <Info className="w-3.5 h-3.5" />
-          </button>
+          {isAdvancedMode && (
+            <button
+              type="button"
+              data-testid="open-about-btn"
+              onClick={() => {
+                AudioService.playCoin();
+                setIsAboutOpen(true);
+              }}
+              title="Universe Architecture Overview"
+              aria-label="Open Overview"
+              className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/10 transition-colors cursor-pointer shrink-0"
+            >
+              <Info className="w-3.5 h-3.5" />
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={handleToggleMute}
-            title={isMuted ? 'Unmute Audio' : 'Mute Audio'}
-            aria-label={isMuted ? 'Unmute audio' : 'Mute audio'}
-            className="hidden sm:flex w-7 h-7 items-center justify-center rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/10 transition-colors cursor-pointer"
-          >
-            {isMuted ? (
-              <VolumeX className="w-3.5 h-3.5 text-rose-400" />
-            ) : (
-              <Volume2 className="w-3.5 h-3.5" />
-            )}
-          </button>
-
-          {gameSettings.showFpsButton !== false && (
+          {isAdvancedMode && gameSettings.showFpsButton !== false && (
             <button
               type="button"
               data-testid="top-right-fps-btn"
@@ -3072,133 +3180,191 @@ export const CapyGameView: React.FC = () => {
       {isScaleAtlasOpen && (
         <div
           data-testid="universe-scale-atlas-panel"
-          className="fixed top-11 left-2 z-40 pointer-events-auto w-[calc(100vw-16px)] max-w-[368px] bg-zinc-950/96 border border-white/15 rounded-xl p-3 text-zinc-100 shadow-2xl space-y-2.5"
+          className="fixed top-11 left-2 z-40 pointer-events-auto w-[calc(100vw-16px)] max-w-[390px] bg-zinc-950/96 border border-white/15 rounded-xl p-3 text-zinc-100 shadow-2xl space-y-2.5"
         >
           <div className="flex items-start justify-between gap-2 border-b border-white/10 pb-2">
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-[10px] font-mono tabular-nums text-sky-400">
-                <span data-testid="scale-scientific-readout">{universeScale.scientificLabel}</span>
-                <span className="text-zinc-600">·</span>
-                <span data-testid="scale-human-readout" className="text-amber-300 font-semibold">
-                  {universeScale.scaleFormatted}
-                </span>
-              </div>
-              <h3
-                data-testid="scale-band-title"
-                className="text-xs font-semibold text-zinc-100 truncate mt-0.5"
-              >
-                {universeScale.bandTitle}
-              </h3>
-              <p className="text-[10px] text-zinc-400 line-clamp-1 mt-0.5">
-                {universeScale.bandSubtitle}
-              </p>
+              {isAdvancedMode ? (
+                <>
+                  <div className="flex items-center gap-1.5 text-[10px] font-mono tabular-nums text-sky-400">
+                    <span data-testid="scale-scientific-readout">{universeScale.scientificLabel}</span>
+                    <span className="text-zinc-600">·</span>
+                    <span data-testid="scale-human-readout" className="text-amber-300 font-semibold">
+                      {universeScale.scaleFormatted}
+                    </span>
+                  </div>
+                  <h3
+                    data-testid="scale-band-title"
+                    className="text-xs font-semibold text-zinc-100 truncate mt-0.5"
+                  >
+                    {universeScale.bandTitle}
+                  </h3>
+                  <p className="text-[10px] text-zinc-400 line-clamp-1 mt-0.5">
+                    {universeScale.bandSubtitle}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-400">
+                    Zoom Explorer ({UNIVERSE_SCALE_BANDS.length} Sizes)
+                  </div>
+                  <h3
+                    data-testid="scale-band-title"
+                    className="text-sm font-semibold text-zinc-100 truncate mt-0.5"
+                  >
+                    {UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || universeScale.bandTitle}
+                  </h3>
+                  <p className="text-[11px] text-zinc-400 line-clamp-1 mt-0.5">
+                    Scroll up or down and tap any picture to fly there!
+                  </p>
+                </>
+              )}
             </div>
             <button
               type="button"
               data-testid="close-scale-atlas-btn"
               onClick={() => setIsScaleAtlasOpen(false)}
-              className="p-1 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-white/10 cursor-pointer shrink-0"
+              className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-white/10 cursor-pointer shrink-0"
               aria-label="Collapse Universe Scale Atlas"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          {/* Continuous Logarithmic Powers-of-10 Scrubber (+28 Big Bang <-> +0.8 Forest <-> -35 Photon) */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-[9px] font-mono text-zinc-400 tabular-nums">
-              <span>10^-35m Photon</span>
-              <span className="text-emerald-300">10^+0.8m Capy Forest</span>
-              <span>10^+28m Big Bang</span>
-            </div>
-            <input
-              type="range"
-              data-testid="universe-scale-slider"
-              min={MIN_UNIVERSE_LOG_METERS}
-              max={MAX_UNIVERSE_LOG_METERS}
-              step={0.05}
-              value={universeScale.targetLogScaleMeters}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                managerRef.current?.setSeamlessLogScale(val, false);
-              }}
-              aria-label="Logarithmic Universe Scale (log10 meters)"
-              className="w-full accent-sky-400 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
-            />
-          </div>
+          {isAdvancedMode && (
+            <>
+              {/* Continuous Logarithmic Powers-of-10 Scrubber (+28 Big Bang <-> +0.8 Forest <-> -35 Photon) */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[9px] font-mono text-zinc-400 tabular-nums">
+                  <span>10^-35m Photon</span>
+                  <span className="text-emerald-300">10^+0.8m Capy Forest</span>
+                  <span>10^+28m Big Bang</span>
+                </div>
+                <input
+                  type="range"
+                  data-testid="universe-scale-slider"
+                  min={MIN_UNIVERSE_LOG_METERS}
+                  max={MAX_UNIVERSE_LOG_METERS}
+                  step={0.05}
+                  value={universeScale.targetLogScaleMeters}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    managerRef.current?.setSeamlessLogScale(val, false);
+                  }}
+                  aria-label="Logarithmic Universe Scale (log10 meters)"
+                  className="w-full accent-sky-400 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
+                />
+              </div>
 
-          {/* Step Zoom, Auto-Journey & Quantum Focus Controls */}
-          <div className="grid grid-cols-4 gap-1 text-[10px] font-mono">
-            <button
-              type="button"
-              data-testid="auto-zoom-quantum-btn"
-              onClick={() => managerRef.current?.toggleAutoZoom(-1)}
-              className={`py-1 px-1.5 rounded border cursor-pointer truncate ${
-                universeScale.autoZoomDir === -1
-                  ? 'bg-sky-500/25 border-sky-400 text-sky-200'
-                  : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-zinc-300'
-              }`}
-            >
-              {universeScale.autoZoomDir === -1 ? 'Pause ↓' : 'Dive 10⁻³⁵'}
-            </button>
-            <button
-              type="button"
-              data-testid="auto-zoom-cosmic-btn"
-              onClick={() => managerRef.current?.toggleAutoZoom(1)}
-              className={`py-1 px-1.5 rounded border cursor-pointer truncate ${
-                universeScale.autoZoomDir === 1
-                  ? 'bg-amber-500/25 border-amber-400 text-amber-200'
-                  : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-zinc-300'
-              }`}
-            >
-              {universeScale.autoZoomDir === 1 ? 'Pause ↑' : 'Rise 10⁺²⁸'}
-            </button>
-            <button
-              type="button"
-              data-testid="quantum-focus-electron"
-              onClick={() => managerRef.current?.setQuantumFocusMode('electron')}
-              className={`py-1 px-1.5 rounded border cursor-pointer truncate ${
-                universeScale.bandId === 'single_electron'
-                  ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200'
-                  : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-cyan-300'
-              }`}
-            >
-              Electron e⁻
-            </button>
-            <button
-              type="button"
-              data-testid="quantum-focus-photon"
-              onClick={() => managerRef.current?.setQuantumFocusMode('photon')}
-              className={`py-1 px-1.5 rounded border cursor-pointer truncate ${
-                universeScale.bandId === 'single_photon'
-                  ? 'bg-amber-500/25 border-amber-400 text-amber-200'
-                  : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-amber-300'
-              }`}
-            >
-              Photon γ
-            </button>
-          </div>
+              {/* Step Zoom, Auto-Journey & Quantum Focus Controls */}
+              <div className="grid grid-cols-4 gap-1 text-[10px] font-mono">
+                <button
+                  type="button"
+                  data-testid="auto-zoom-quantum-btn"
+                  onClick={() => managerRef.current?.toggleAutoZoom(-1)}
+                  className={`py-1 px-1.5 rounded border cursor-pointer truncate ${
+                    universeScale.autoZoomDir === -1
+                      ? 'bg-sky-500/25 border-sky-400 text-sky-200'
+                      : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-zinc-300'
+                  }`}
+                >
+                  {universeScale.autoZoomDir === -1 ? 'Pause ↓' : 'Dive 10⁻³⁵'}
+                </button>
+                <button
+                  type="button"
+                  data-testid="auto-zoom-cosmic-btn"
+                  onClick={() => managerRef.current?.toggleAutoZoom(1)}
+                  className={`py-1 px-1.5 rounded border cursor-pointer truncate ${
+                    universeScale.autoZoomDir === 1
+                      ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                      : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-zinc-300'
+                  }`}
+                >
+                  {universeScale.autoZoomDir === 1 ? 'Pause ↑' : 'Rise 10⁺²⁸'}
+                </button>
+                <button
+                  type="button"
+                  data-testid="quantum-focus-electron"
+                  onClick={() => managerRef.current?.setQuantumFocusMode('electron')}
+                  className={`py-1 px-1.5 rounded border cursor-pointer truncate ${
+                    universeScale.bandId === 'single_electron'
+                      ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200'
+                      : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-cyan-300'
+                  }`}
+                >
+                  Electron e⁻
+                </button>
+                <button
+                  type="button"
+                  data-testid="quantum-focus-photon"
+                  onClick={() => managerRef.current?.setQuantumFocusMode('photon')}
+                  className={`py-1 px-1.5 rounded border cursor-pointer truncate ${
+                    universeScale.bandId === 'single_photon'
+                      ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                      : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-amber-300'
+                  }`}
+                >
+                  Photon γ
+                </button>
+              </div>
+            </>
+          )}
 
-          {/* All 25 Scales Quick-Jump Atlas */}
-          <div className="grid grid-cols-3 gap-1 max-h-44 overflow-y-auto pr-0.5">
-            {UNIVERSE_SCALE_BANDS.map((band) => {
+          {/* Single Long Vertically Scrollable List of All 27 Zoom Levels with Up-to-Date Thumbnails */}
+          <div
+            data-testid="zoom-levels-list"
+            className="flex flex-col gap-2 max-h-[54vh] overflow-y-auto pr-1"
+          >
+            {UNIVERSE_SCALE_BANDS.map((band, idx) => {
               const isCurrent = band.id === universeScale.bandId;
+              const thumbSrc =
+                liveZoomThumbnails[band.id] || `./assets/zoom_thumbs/${band.id}.jpg`;
               return (
                 <button
                   key={band.id}
                   type="button"
                   data-testid={`scale-band-btn-${band.id}`}
                   onClick={() => managerRef.current?.jumpToScaleBand(band.id, false)}
-                  className={`px-1.5 py-1 rounded border text-left transition-colors cursor-pointer ${
+                  className={`w-full flex items-center gap-2.5 p-2 rounded-xl border text-left transition-colors cursor-pointer shrink-0 ${
                     isCurrent
-                      ? 'bg-sky-500/25 border-sky-400 text-zinc-100'
-                      : 'bg-zinc-900/85 hover:bg-zinc-800 border-white/10 text-zinc-300'
+                      ? 'bg-sky-500/20 border-sky-400 text-zinc-100'
+                      : 'bg-zinc-900/90 hover:bg-zinc-800 border-white/10 text-zinc-200'
                   }`}
                 >
-                  <div className="text-[9px] font-mono text-sky-400 tabular-nums leading-none">
-                    10^{band.logMeters >= 0 ? `+${band.logMeters}` : band.logMeters}m
+                  <img
+                    data-testid={`scale-band-thumb-${band.id}`}
+                    src={thumbSrc}
+                    alt={`${band.shortLabel} preview`}
+                    className="w-24 h-[60px] sm:w-28 sm:h-[70px] rounded-lg object-cover shrink-0 bg-zinc-950 border border-white/15"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[10px] font-mono text-sky-400 tabular-nums truncate">
+                        {isAdvancedMode
+                          ? `10^${band.logMeters >= 0 ? `+${band.logMeters}` : band.logMeters}m · #${idx + 1}`
+                          : `#${idx + 1} · ${
+                              band.domain === 'cosmic'
+                                ? 'Space'
+                                : band.domain === 'planetary'
+                                  ? 'Earth'
+                                  : 'Tiny World'
+                            }`}
+                      </span>
+                      {isCurrent && (
+                        <span className="px-1.5 py-0.5 rounded bg-sky-400 text-zinc-950 text-[9px] font-semibold shrink-0">
+                          HERE
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs sm:text-sm font-semibold text-zinc-100 truncate mt-0.5">
+                      {isAdvancedMode ? band.title : band.shortLabel}
+                    </div>
+                    <p className="text-[11px] text-zinc-400 line-clamp-2 mt-0.5 leading-snug">
+                      {isAdvancedMode
+                        ? band.subtitle
+                        : KID_FRIENDLY_BAND_DESCRIPTIONS[band.id]}
+                    </p>
                   </div>
-                  <div className="text-[10px] font-medium truncate mt-0.5">{band.shortLabel}</div>
                 </button>
               );
             })}
@@ -3211,9 +3377,11 @@ export const CapyGameView: React.FC = () => {
               managerRef.current?.resumeSurfacePlayFromForest();
               setIsScaleAtlasOpen(false);
             }}
-            className="w-full py-1.5 px-2.5 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-zinc-950 font-semibold text-xs transition-colors cursor-pointer"
+            className="w-full py-2 px-3 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-zinc-950 font-semibold text-xs transition-colors cursor-pointer"
           >
-            Land &amp; Control Capybara in Forest (10⁺⁰·⁸ m)
+            {isAdvancedMode
+              ? 'Land & Control Capybara in Forest (10⁺⁰·⁸ m)'
+              : 'Play on Capybara Island!'}
           </button>
         </div>
       )}
@@ -3570,80 +3738,184 @@ export const CapyGameView: React.FC = () => {
           data-testid="top-info-dropdown"
           className="fixed top-11 left-2 right-2 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:w-[340px] z-40 pointer-events-auto bg-zinc-950/96 border border-white/15 rounded-xl p-3 text-zinc-100 shadow-2xl space-y-2.5 max-h-[80vh] overflow-y-auto"
         >
-          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 border-b border-white/10 pb-1.5 gap-1 tabular-nums">
-            <span className="text-emerald-400 font-semibold">
-              {cosmicStage === 'playing' ? snakeTelemetry.fps : simStats.fps} FPS
-            </span>
-            <span>{universeScale.scientificLabel}</span>
-            <span className="truncate">{universeScale.bandTitle}</span>
-            <button
-              type="button"
-              data-testid="close-infographic-btn"
-              onClick={() => setIsInfographicExpanded(false)}
-              title="Close Inspector"
-              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/10 cursor-pointer shrink-0"
-            >
-              <X className="w-3 h-3 text-zinc-400" />
-            </button>
-          </div>
-
-          {/* STAGE 0: SINGULARITY */}
-          {cosmicStage === 'singularity' && (
-            <div className="space-y-2">
-              <div>
-                <div className="text-[10px] font-mono uppercase tracking-wider text-sky-400">
-                  T = 0.00s · INITIAL STATE
+          {!isAdvancedMode ? (
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-2">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-400">
+                    Adventure Guide
+                  </div>
+                  <h2 className="text-sm font-semibold text-zinc-100 truncate">
+                    {cosmicStage === 'playing' && !universeScale.active
+                      ? currentZone.title
+                      : UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || 'Space Explorer'}
+                  </h2>
                 </div>
-                <h2 className="text-xs font-semibold text-zinc-100 mt-0.5">
-                  Primordial Singularity
-                </h2>
-                <p className="text-[11px] text-zinc-400 leading-snug mt-0.5">
-                  Click the central white point or zoom continuously from Big Bang (10^+28m) to Capybara Forest (10^+0.8m) and Quantum Photon (10^-35m).
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono bg-zinc-900/90 p-2 rounded-lg border border-white/8">
-                <div>
-                  <span className="text-zinc-500 block">TRACKED SEED</span>
-                  <span data-testid="tracked-star-id" className="text-sky-300 font-semibold">
-                    {cosmicSimInfo.trackedStar.catalogId}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-zinc-500 block">BARYON NODES</span>
-                  <span className="text-zinc-200">4.8×10⁴ Persistent</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1.5 pt-0.5">
                 <button
                   type="button"
-                  data-testid="trigger-big-bang-btn"
-                  onClick={() => managerRef.current?.triggerBigBang()}
-                  className="flex-1 py-1.5 px-3 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-xs transition-colors cursor-pointer"
+                  data-testid="close-infographic-btn"
+                  onClick={() => setIsInfographicExpanded(false)}
+                  title="Close"
+                  className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/10 cursor-pointer shrink-0"
                 >
-                  Ignite Big Bang
-                </button>
-                <button
-                  type="button"
-                  data-testid="pick-random-tracked-star-btn"
-                  onClick={() => managerRef.current?.pickRandomTrackedStar()}
-                  title="Pick a random persistent star seed to follow from T=0"
-                  className="py-1.5 px-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-sky-300 font-mono text-[10px] border border-sky-400/30 cursor-pointer"
-                >
-                  Random Star
-                </button>
-                <button
-                  type="button"
-                  data-testid="skip-cosmic-to-world-btn"
-                  onClick={() => managerRef.current?.setCosmicStage('playing')}
-                  className="py-1.5 px-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium text-[11px] border border-white/10 cursor-pointer"
-                >
-                  Surface
+                  <X className="w-3.5 h-3.5 text-zinc-400" />
                 </button>
               </div>
+
+              {cosmicStage === 'playing' && !universeScale.active ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-zinc-300 leading-relaxed">
+                    {activeMode === 'sanctuary'
+                      ? 'Bump fruit trees matching the orange on your head to grow longer! Visit the four glowing portals around the island to play more games.'
+                      : currentZone.subtitle}
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsInfographicExpanded(false);
+                        setIsScaleAtlasOpen(true);
+                        managerRef.current?.requestCurrentBandThumbnail();
+                      }}
+                      className="py-2 px-2.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 font-semibold text-xs border border-sky-400/40 cursor-pointer"
+                    >
+                      Zoom Explorer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsInfographicExpanded(false);
+                        setActiveTab('wardrobe');
+                        setIsMenuOpen(true);
+                      }}
+                      className="py-2 px-2.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-semibold text-xs border border-amber-400/40 cursor-pointer"
+                    >
+                      Pick a Hat
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-zinc-300 leading-relaxed">
+                    {KID_FRIENDLY_BAND_DESCRIPTIONS[universeScale.bandId] ||
+                      'Tap Play on Island to meet your Capybara right away, or watch the Big Bang create stars!'}
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    <button
+                      type="button"
+                      data-testid="skip-cosmic-to-world-btn"
+                      onClick={() => {
+                        managerRef.current?.resumeSurfacePlayFromForest();
+                        setIsInfographicExpanded(false);
+                      }}
+                      className="w-full py-2 px-3 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-zinc-950 font-semibold text-xs transition-colors cursor-pointer"
+                    >
+                      Play on Capybara Island!
+                    </button>
+                    {cosmicStage === 'singularity' && (
+                      <button
+                        type="button"
+                        data-testid="trigger-big-bang-btn"
+                        onClick={() => {
+                          managerRef.current?.triggerBigBang();
+                          setIsInfographicExpanded(false);
+                        }}
+                        className="w-full py-2 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-semibold text-xs border border-white/10 transition-colors cursor-pointer"
+                      >
+                        Start Big Bang Fireworks
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsInfographicExpanded(false);
+                        setIsScaleAtlasOpen(true);
+                        managerRef.current?.requestCurrentBandThumbnail();
+                      }}
+                      className="w-full py-1.5 px-3 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-sky-300 font-medium text-xs border border-sky-400/30 transition-colors cursor-pointer"
+                    >
+                      See All {UNIVERSE_SCALE_BANDS.length} Zoom Pictures
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+          ) : (
+            <>
+              <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 border-b border-white/10 pb-1.5 gap-1 tabular-nums">
+                <span className="text-emerald-400 font-semibold">
+                  {cosmicStage === 'playing' ? snakeTelemetry.fps : simStats.fps} FPS
+                </span>
+                <span>{universeScale.scientificLabel}</span>
+                <span className="truncate">{universeScale.bandTitle}</span>
+                <button
+                  type="button"
+                  data-testid="close-infographic-btn"
+                  onClick={() => setIsInfographicExpanded(false)}
+                  title="Close Inspector"
+                  className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/10 cursor-pointer shrink-0"
+                >
+                  <X className="w-3 h-3 text-zinc-400" />
+                </button>
+              </div>
+
+              {/* STAGE 0: SINGULARITY */}
+              {cosmicStage === 'singularity' && (
+                <div className="space-y-2">
+                  <div>
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-sky-400">
+                      T = 0.00s · INITIAL STATE
+                    </div>
+                    <h2 className="text-xs font-semibold text-zinc-100 mt-0.5">
+                      Primordial Singularity
+                    </h2>
+                    <p className="text-[11px] text-zinc-400 leading-snug mt-0.5">
+                      Click the central white point or zoom continuously from Big Bang (10^+28m) to Capybara Forest (10^+0.8m) and Quantum Photon (10^-35m).
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono bg-zinc-900/90 p-2 rounded-lg border border-white/8">
+                    <div>
+                      <span className="text-zinc-500 block">TRACKED SEED</span>
+                      <span data-testid="tracked-star-id" className="text-sky-300 font-semibold">
+                        {cosmicSimInfo.trackedStar.catalogId}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 block">BARYON NODES</span>
+                      <span className="text-zinc-200">4.8×10⁴ Persistent</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <button
+                      type="button"
+                      data-testid="trigger-big-bang-btn"
+                      onClick={() => managerRef.current?.triggerBigBang()}
+                      className="flex-1 py-1.5 px-3 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-xs transition-colors cursor-pointer"
+                    >
+                      Ignite Big Bang
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="pick-random-tracked-star-btn"
+                      onClick={() => managerRef.current?.pickRandomTrackedStar()}
+                      title="Pick a random persistent star seed to follow from T=0"
+                      className="py-1.5 px-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-sky-300 font-mono text-[10px] border border-sky-400/30 cursor-pointer"
+                    >
+                      Random Star
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="skip-cosmic-to-world-btn"
+                      onClick={() => managerRef.current?.setCosmicStage('playing')}
+                      className="py-1.5 px-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-medium text-[11px] border border-white/10 cursor-pointer"
+                    >
+                      Surface
+                    </button>
+                  </div>
+                </div>
+              )}
 
           {/* STAGE 1: N-BODY GRAVITY, SUPERNOVA NUCLEOSYNTHESIS & PERSISTENT STAR TRACKER */}
           {cosmicStage === 'big_bang' && (
@@ -4398,6 +4670,8 @@ export const CapyGameView: React.FC = () => {
               </div>
             </div>
           )}
+            </>
+          )}
         </div>
       )}
 
@@ -4414,15 +4688,23 @@ export const CapyGameView: React.FC = () => {
               <div className="flex items-center gap-1.5 bg-zinc-900 border border-white/10 px-2.5 py-1 rounded-md text-xs">
                 <Compass className="w-3 h-3 text-sky-400 shrink-0" />
                 <span className="font-semibold text-zinc-100">{currentZone.title}</span>
-                <span className="text-[10px] font-mono text-zinc-400">
-                  {currentModeInfo.compass}
-                </span>
+                {isAdvancedMode && (
+                  <span className="text-[10px] font-mono text-zinc-400">
+                    {currentModeInfo.compass}
+                  </span>
+                )}
               </div>
 
               <div className="flex lg:hidden items-center gap-1.5 bg-zinc-900 border border-white/10 px-2 py-1 rounded-md text-[11px] font-mono tabular-nums">
-                <span className="text-emerald-300 font-semibold">{stats.dna} DNA</span>
-                <span className="text-zinc-600">·</span>
-                <span className="text-amber-300 font-semibold">{stats.coins ?? 0}c</span>
+                {isAdvancedMode && (
+                  <>
+                    <span className="text-emerald-300 font-semibold">{stats.dna} DNA</span>
+                    <span className="text-zinc-600">·</span>
+                  </>
+                )}
+                <span className="text-amber-300 font-semibold">
+                  {stats.coins ?? 0} {isAdvancedMode ? 'c' : 'Coins'}
+                </span>
               </div>
 
               <div
@@ -4430,7 +4712,9 @@ export const CapyGameView: React.FC = () => {
                 className="flex items-center gap-1.5 bg-zinc-900 border border-white/10 px-2 py-1 rounded-md text-[11px] font-mono text-zinc-300"
               >
                 <span>
-                  SECTORS {unlockedCount}/{PROGRESSIVE_UNLOCKS.length}
+                  {isAdvancedMode
+                    ? `SECTORS ${unlockedCount}/${PROGRESSIVE_UNLOCKS.length}`
+                    : `${unlockedCount}/${PROGRESSIVE_UNLOCKS.length} Open`}
                 </span>
                 {unlockedCount < PROGRESSIVE_UNLOCKS.length && (
                   <button
@@ -4439,63 +4723,67 @@ export const CapyGameView: React.FC = () => {
                     onClick={handleUnlockAllFeatures}
                     className="ml-1 px-1.5 py-0.5 rounded bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 text-sky-300 font-sans font-medium text-[10px] cursor-pointer"
                   >
-                    Unlock All
+                    {isAdvancedMode ? 'Unlock All' : 'Unlock Everything'}
                   </button>
                 )}
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-1">
-              <button
-                type="button"
-                data-testid="launch-chrono-vessel-btn"
-                onClick={() => {
-                  managerRef.current?.launchIntoCosmos(22.0);
-                  setIsMenuOpen(false);
-                }}
-                className="flex items-center gap-1 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 font-medium text-[11px] px-2 py-1 rounded-md border border-cyan-400/40 transition-colors cursor-pointer"
-              >
-                <Rocket className="w-3 h-3 text-cyan-300" />
-                <span>Chrono-Flight</span>
-              </button>
+              {isAdvancedMode && (
+                <>
+                  <button
+                    type="button"
+                    data-testid="launch-chrono-vessel-btn"
+                    onClick={() => {
+                      managerRef.current?.launchIntoCosmos(22.0);
+                      setIsMenuOpen(false);
+                    }}
+                    className="flex items-center gap-1 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 font-medium text-[11px] px-2 py-1 rounded-md border border-cyan-400/40 transition-colors cursor-pointer"
+                  >
+                    <Rocket className="w-3 h-3 text-cyan-300" />
+                    <span>Chrono-Flight</span>
+                  </button>
 
-              <button
-                type="button"
-                data-testid="open-cosmic-map-btn"
-                onClick={() => {
-                  AudioService.playCosmicWarp(1.0);
-                  managerRef.current?.setCosmicStage('universe_flight');
-                  setIsMenuOpen(false);
-                }}
-                className="flex items-center gap-1 bg-zinc-900 hover:bg-zinc-800 text-sky-300 font-medium text-[11px] px-2 py-1 rounded-md border border-sky-500/30 transition-colors cursor-pointer"
-              >
-                <Sparkles className="w-3 h-3 text-sky-400" />
-                <span>Cosmic Map</span>
-              </button>
+                  <button
+                    type="button"
+                    data-testid="open-cosmic-map-btn"
+                    onClick={() => {
+                      AudioService.playCosmicWarp(1.0);
+                      managerRef.current?.setCosmicStage('universe_flight');
+                      setIsMenuOpen(false);
+                    }}
+                    className="flex items-center gap-1 bg-zinc-900 hover:bg-zinc-800 text-sky-300 font-medium text-[11px] px-2 py-1 rounded-md border border-sky-500/30 transition-colors cursor-pointer"
+                  >
+                    <Sparkles className="w-3 h-3 text-sky-400" />
+                    <span>Cosmic Map</span>
+                  </button>
 
-              <button
-                type="button"
-                data-testid="open-capy-select-btn"
-                onClick={() => {
-                  AudioService.playCoin();
-                  managerRef.current?.setCosmicStage('capy_selection');
-                  setIsMenuOpen(false);
-                }}
-                className="flex items-center gap-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 font-medium text-[11px] px-2 py-1 rounded-md border border-white/12 transition-colors cursor-pointer"
-              >
-                <Crown className="w-3 h-3 text-amber-400" />
-                <span>Select Unit</span>
-              </button>
+                  <button
+                    type="button"
+                    data-testid="open-capy-select-btn"
+                    onClick={() => {
+                      AudioService.playCoin();
+                      managerRef.current?.setCosmicStage('capy_selection');
+                      setIsMenuOpen(false);
+                    }}
+                    className="flex items-center gap-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 font-medium text-[11px] px-2 py-1 rounded-md border border-white/12 transition-colors cursor-pointer"
+                  >
+                    <Crown className="w-3 h-3 text-amber-400" />
+                    <span>Select Unit</span>
+                  </button>
 
-              <button
-                type="button"
-                data-testid="open-first-run-setup-btn"
-                onClick={handleOpenFirstRunSetup}
-                className="flex items-center gap-1 bg-zinc-900 hover:bg-zinc-800 text-amber-300 font-medium text-[11px] px-2 py-1 rounded-md border border-amber-400/30 transition-colors cursor-pointer"
-              >
-                <Sparkles className="w-3 h-3 text-amber-400" />
-                <span>Genesis Setup</span>
-              </button>
+                  <button
+                    type="button"
+                    data-testid="open-first-run-setup-btn"
+                    onClick={handleOpenFirstRunSetup}
+                    className="flex items-center gap-1 bg-zinc-900 hover:bg-zinc-800 text-amber-300 font-medium text-[11px] px-2 py-1 rounded-md border border-amber-400/30 transition-colors cursor-pointer"
+                  >
+                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    <span>Genesis Setup</span>
+                  </button>
+                </>
+              )}
 
               <button
                 type="button"
@@ -4508,7 +4796,15 @@ export const CapyGameView: React.FC = () => {
                 }`}
               >
                 <Camera className="w-3 h-3" />
-                <span>{gameSettings.cameraFollowBehind ? 'Chase Cam: ON' : 'Fixed Cam'}</span>
+                <span>
+                  {isAdvancedMode
+                    ? gameSettings.cameraFollowBehind
+                      ? 'Chase Cam: ON'
+                      : 'Fixed Cam'
+                    : gameSettings.cameraFollowBehind
+                      ? 'Follow Capy: ON'
+                      : 'Follow Capy: OFF'}
+                </span>
               </button>
             </div>
           </div>
@@ -4527,7 +4823,7 @@ export const CapyGameView: React.FC = () => {
                   }`}
                 >
                   <Compass className="w-3.5 h-3.5" />
-                  <span>Sectors (5)</span>
+                  <span>{isAdvancedMode ? 'Sectors (5)' : 'Places'}</span>
                 </button>
 
                 <button
@@ -4541,44 +4837,48 @@ export const CapyGameView: React.FC = () => {
                   }`}
                 >
                   <Hammer className="w-3.5 h-3.5" />
-                  <span>Structures</span>
+                  <span>{isAdvancedMode ? 'Structures' : 'Build'}</span>
                 </button>
 
-                <button
-                  type="button"
-                  data-testid="tab-dna"
-                  onClick={() => handleSelectTab('dna')}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                    activeTab === 'dna'
-                      ? 'bg-zinc-800 text-zinc-100 border border-white/15'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-                  }`}
-                >
-                  {isTabUnlocked('dna') ? (
-                    <Dna className="w-3.5 h-3.5" />
-                  ) : (
-                    <Lock className="w-3 h-3 text-zinc-500" />
-                  )}
-                  <span>Bio-Traits</span>
-                </button>
+                {isAdvancedMode && (
+                  <>
+                    <button
+                      type="button"
+                      data-testid="tab-dna"
+                      onClick={() => handleSelectTab('dna')}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                        activeTab === 'dna'
+                          ? 'bg-zinc-800 text-zinc-100 border border-white/15'
+                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+                      }`}
+                    >
+                      {isTabUnlocked('dna') ? (
+                        <Dna className="w-3.5 h-3.5" />
+                      ) : (
+                        <Lock className="w-3 h-3 text-zinc-500" />
+                      )}
+                      <span>Bio-Traits</span>
+                    </button>
 
-                <button
-                  type="button"
-                  data-testid="tab-upgrades"
-                  onClick={() => handleSelectTab('upgrades')}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                    activeTab === 'upgrades'
-                      ? 'bg-zinc-800 text-zinc-100 border border-white/15'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-                  }`}
-                >
-                  {isTabUnlocked('upgrades') ? (
-                    <ArrowUpCircle className="w-3.5 h-3.5" />
-                  ) : (
-                    <Lock className="w-3 h-3 text-zinc-500" />
-                  )}
-                  <span>Parameters</span>
-                </button>
+                    <button
+                      type="button"
+                      data-testid="tab-upgrades"
+                      onClick={() => handleSelectTab('upgrades')}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                        activeTab === 'upgrades'
+                          ? 'bg-zinc-800 text-zinc-100 border border-white/15'
+                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+                      }`}
+                    >
+                      {isTabUnlocked('upgrades') ? (
+                        <ArrowUpCircle className="w-3.5 h-3.5" />
+                      ) : (
+                        <Lock className="w-3 h-3 text-zinc-500" />
+                      )}
+                      <span>Parameters</span>
+                    </button>
+                  </>
+                )}
 
                 <button
                   type="button"
@@ -4595,7 +4895,7 @@ export const CapyGameView: React.FC = () => {
                   ) : (
                     <Lock className="w-3 h-3 text-zinc-500" />
                   )}
-                  <span>Loadout</span>
+                  <span>{isAdvancedMode ? 'Loadout' : 'Hats'}</span>
                 </button>
               </div>
 
@@ -4889,7 +5189,9 @@ export const CapyGameView: React.FC = () => {
                           }`}
                         >
                           <div>
-                            <span className="text-xs font-semibold text-zinc-100">{item.name}</span>
+                            <span className="text-xs font-semibold text-zinc-100">
+                              {isAdvancedMode ? item.name : item.kidName}
+                            </span>
                             <p className="text-[10px] text-zinc-400 mt-0.5">{item.description}</p>
                           </div>
                           <span
@@ -4902,10 +5204,14 @@ export const CapyGameView: React.FC = () => {
                             }`}
                           >
                             {isSelected
-                              ? 'EQUIPPED'
+                              ? isAdvancedMode
+                                ? 'EQUIPPED'
+                                : 'WEARING'
                               : isUnlocked
-                                ? 'EQUIP'
-                                : `UNLOCK ${hatCost}c`}
+                                ? isAdvancedMode
+                                  ? 'EQUIP'
+                                  : 'WEAR'
+                                : `${isAdvancedMode ? 'UNLOCK' : 'BUY'} ${hatCost}c`}
                           </span>
                         </button>
                       );
@@ -5063,10 +5369,12 @@ export const CapyGameView: React.FC = () => {
                 <SettingsIcon className="w-4 h-4 text-sky-400" />
                 <div>
                   <h2 className="text-sm font-semibold tracking-wider uppercase">
-                    Simulation Settings
+                    {isAdvancedMode ? 'Simulation Settings' : 'Game Settings'}
                   </h2>
                   <p className="text-[11px] font-mono text-zinc-400">
-                    Camera kinematics, field of view & audio synthesis
+                    {isAdvancedMode
+                      ? 'Camera kinematics, GPU pipeline & save backups'
+                      : 'Simple controls for sound, weather, time & mode'}
                   </p>
                 </div>
               </div>
@@ -5081,7 +5389,237 @@ export const CapyGameView: React.FC = () => {
               </button>
             </div>
 
-            <div className="p-3 sm:p-5 space-y-2 sm:space-y-3.5 max-h-[88vh] overflow-y-auto">
+            <div className="p-3 sm:p-5 space-y-2.5 sm:space-y-3.5 max-h-[84vh] overflow-y-auto">
+              {/* Prominent Basic Mode vs Advanced Mode Switcher */}
+              <div
+                data-testid="settings-mode-panel"
+                className="p-3 rounded-lg bg-zinc-950/90 border border-sky-400/35 space-y-2"
+              >
+                <div>
+                  <div className="text-xs font-semibold text-zinc-100">
+                    Interface Complexity
+                  </div>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">
+                    Start simple in Basic Mode, or turn on Advanced Mode for full science dials, FPS stats, and JSON tools.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    data-testid="settings-mode-basic-btn"
+                    onClick={() => {
+                      updateGameSettings({ advancedMode: false });
+                      setIsOpticsOpen(false);
+                      setIsPerfLogOpen(false);
+                      setIsJsonEditorOpen(false);
+                      if (activeTab === 'dna' || activeTab === 'upgrades') {
+                        setActiveTab('modes');
+                      }
+                    }}
+                    className={`py-2 px-3 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                      !isAdvancedMode
+                        ? 'bg-sky-500/25 border-sky-400 text-sky-100'
+                        : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-zinc-400'
+                    }`}
+                  >
+                    Basic Mode
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="settings-mode-advanced-btn"
+                    onClick={() => updateGameSettings({ advancedMode: true })}
+                    className={`py-2 px-3 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                      isAdvancedMode
+                        ? 'bg-amber-500/25 border-amber-400 text-amber-100'
+                        : 'bg-zinc-900 hover:bg-zinc-800 border-white/10 text-zinc-400'
+                    }`}
+                  >
+                    Advanced Mode
+                  </button>
+                </div>
+              </div>
+
+              {!isAdvancedMode ? (
+                <>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-950/80 border border-white/10">
+                    <div>
+                      <div className="text-xs font-semibold text-zinc-100">Sound Effects</div>
+                      <div className="text-[11px] text-zinc-400">Music and fun game sounds</div>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="settings-basic-mute-btn"
+                      onClick={handleToggleMute}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer ${
+                        !isMuted
+                          ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/45'
+                          : 'bg-zinc-900 text-zinc-400 border-white/10'
+                      }`}
+                    >
+                      {!isMuted ? 'Sound ON' : 'Muted'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 p-3 rounded-lg bg-zinc-950/80 border border-white/10">
+                    <div>
+                      <div className="text-xs font-semibold text-zinc-100">
+                        Camera Follows Capybara
+                      </div>
+                      <p className="text-[11px] text-zinc-400 mt-0.5">
+                        Keep the camera behind your Capybara as you explore
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="settings-toggle-chase-cam"
+                      onClick={() =>
+                        updateGameSettings({
+                          cameraFollowBehind: !gameSettings.cameraFollowBehind,
+                        })
+                      }
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer shrink-0 border ${
+                        gameSettings.cameraFollowBehind
+                          ? 'bg-sky-500/20 text-sky-200 border-sky-400/45'
+                          : 'bg-zinc-900 text-zinc-400 border-white/10'
+                      }`}
+                    >
+                      {gameSettings.cameraFollowBehind ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-zinc-950/80 border border-white/10 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-zinc-100">Time of Day</span>
+                      <span className="text-[11px] text-amber-300 font-medium">
+                        {gameSettings.dayNightAutoCycle ? 'Auto Day/Night' : snakeTelemetry.dayPhaseLabel}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => updateGameSettings({ dayNightAutoCycle: true })}
+                        className={`px-1.5 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer border ${
+                          gameSettings.dayNightAutoCycle
+                            ? 'bg-amber-500/20 text-amber-200 border-amber-400/45'
+                            : 'bg-zinc-900 text-zinc-400 border-white/10 hover:text-zinc-200'
+                        }`}
+                      >
+                        Auto
+                      </button>
+                      {(
+                        [
+                          { id: 'dawn', label: 'Morning', hour: 6.2 },
+                          { id: 'noon', label: 'Noon', hour: 12.0 },
+                          { id: 'dusk', label: 'Sunset', hour: 18.2 },
+                          { id: 'night', label: 'Night', hour: 23.0 },
+                        ] as const
+                      ).map((phase) => (
+                        <button
+                          key={phase.id}
+                          type="button"
+                          data-testid={`settings-phase-${phase.id}`}
+                          onClick={() =>
+                            updateGameSettings({
+                              dayNightAutoCycle: false,
+                              timeOfDayHours: phase.hour,
+                            })
+                          }
+                          className={`px-1.5 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer border ${
+                            !gameSettings.dayNightAutoCycle &&
+                            Math.abs((gameSettings.timeOfDayHours ?? 9.5) - phase.hour) < 0.8
+                              ? 'bg-amber-500/20 text-amber-200 border-amber-400/45'
+                              : 'bg-zinc-900 text-zinc-400 border-white/10 hover:text-zinc-200'
+                          }`}
+                        >
+                          {phase.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-zinc-950/80 border border-white/10 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-zinc-100">Weather</span>
+                      <span className="text-[11px] text-sky-300 font-medium">
+                        {snakeTelemetry.weatherLabel}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {(
+                        [
+                          { id: 'auto', label: 'Auto' },
+                          { id: 'clear', label: 'Sunny' },
+                          { id: 'rain', label: 'Rainy' },
+                          { id: 'storm', label: 'Storm' },
+                          { id: 'snow', label: 'Snowy' },
+                        ] as Array<{ id: 'auto' | WeatherType; label: string }>
+                      ).map((w) => (
+                        <button
+                          key={w.id}
+                          type="button"
+                          data-testid={`settings-weather-${w.id}`}
+                          onClick={() => updateGameSettings({ weatherMode: w.id })}
+                          className={`px-1.5 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer border ${
+                            gameSettings.weatherMode === w.id
+                              ? 'bg-sky-500/20 text-sky-200 border-sky-400/45'
+                              : 'bg-zinc-900 text-zinc-400 border-white/10 hover:text-zinc-200'
+                          }`}
+                        >
+                          {w.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-zinc-950/80 border border-white/10 flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-semibold text-zinc-100">On-Screen Arrows</div>
+                      <div className="text-[11px] text-zinc-400">Touch buttons on phones</div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {(
+                        [
+                          { id: 'auto', label: 'Auto' },
+                          { id: 'always', label: 'Show' },
+                          { id: 'hidden', label: 'Hide' },
+                        ] as const
+                      ).map((mode) => (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => updateGameSettings({ touchControlsMode: mode.id })}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-medium cursor-pointer border ${
+                            gameSettings.touchControlsMode === mode.id
+                              ? 'bg-sky-500/20 text-sky-200 border-sky-400/45'
+                              : 'bg-zinc-900 text-zinc-400 border-white/10'
+                          }`}
+                        >
+                          {mode.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/10">
+                    <button
+                      type="button"
+                      onClick={handleUnlockAllFeatures}
+                      className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-semibold border border-white/10 cursor-pointer"
+                    >
+                      Unlock Everything
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleResetProgress}
+                      className="px-3 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 text-xs font-semibold border border-rose-500/30 cursor-pointer"
+                    >
+                      Start Over
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
               <div className="flex items-center justify-between gap-4 p-3 rounded-lg bg-zinc-950/80 border border-white/10">
                 <div>
                   <div className="text-xs font-semibold text-zinc-100">
@@ -6309,6 +6847,8 @@ export const CapyGameView: React.FC = () => {
                   Reset State
                 </button>
               </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -6964,113 +7504,146 @@ export const CapyGameView: React.FC = () => {
       {universeScale.active && !isFirstRunSetupOpen && !webglError && !isJsonEditorOpen && !isSettingsOpen && (
         <div
           data-testid="chrono-vessel-flight-strip"
-          className="fixed bottom-2 left-1/2 -translate-x-1/2 z-30 pointer-events-auto w-[calc(100vw-16px)] max-w-[700px] bg-zinc-950/95 border border-cyan-400/30 rounded-xl shadow-2xl px-2.5 py-1.5 text-zinc-100"
+          className={`fixed bottom-2 left-1/2 -translate-x-1/2 z-30 pointer-events-auto bg-zinc-950/95 border border-cyan-400/30 rounded-xl shadow-2xl px-2.5 py-1.5 text-zinc-100 ${
+            isAdvancedMode ? 'w-[calc(100vw-16px)] max-w-[700px]' : 'w-auto max-w-[calc(100vw-16px)]'
+          }`}
         >
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <Rocket className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <span className="text-[11px] font-semibold text-zinc-100 truncate">
-                Chrono-Vessel
-              </span>
-              <span
-                data-testid="flight-strip-epoch"
-                className="text-[10px] font-mono tabular-nums text-cyan-300 shrink-0"
+          {!isAdvancedMode ? (
+            <div className="flex items-center justify-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => managerRef.current?.stepScaleBand(1)}
+                className="px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-white/10 text-xs font-medium cursor-pointer flex items-center gap-1 whitespace-nowrap"
               >
-                T+{universeScale.cosmicAgeGyr.toFixed(2)} Gyr
-              </span>
-              <span className="text-zinc-600 text-[10px] hidden sm:inline">·</span>
-              <span className="hidden sm:inline text-[10px] font-mono tabular-nums text-amber-300 shrink-0">
-                {universeScale.scientificLabel} ({universeScale.scaleFormatted})
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1 shrink-0">
+                <Minus className="w-3 h-3" />
+                <span>Zoom Out</span>
+              </button>
               <button
                 type="button"
                 data-testid="chrono-land-pad-btn"
                 onClick={() => managerRef.current?.engageAutoLanding()}
-                className="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/45 text-[10px] font-mono font-semibold cursor-pointer whitespace-nowrap"
+                className="px-3 py-1.5 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-semibold cursor-pointer whitespace-nowrap"
               >
-                Land on Pad
+                Play on Island!
               </button>
               <button
                 type="button"
-                data-testid="toggle-flight-strip-collapse"
-                onClick={() => setIsFlightStripCollapsed((prev) => !prev)}
-                aria-label={isFlightStripCollapsed ? 'Expand Chrono Controls' : 'Collapse Chrono Controls'}
-                className="p-1 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-white/10 cursor-pointer"
+                onClick={() => managerRef.current?.stepScaleBand(-1)}
+                className="px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-white/10 text-xs font-medium cursor-pointer flex items-center gap-1 whitespace-nowrap"
               >
-                {isFlightStripCollapsed ? (
-                  <ChevronUp className="w-3.5 h-3.5" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5" />
-                )}
+                <span>Zoom In</span>
+                <Plus className="w-3 h-3" />
               </button>
             </div>
-          </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Rocket className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span className="text-[11px] font-semibold text-zinc-100 truncate">
+                    Chrono-Vessel
+                  </span>
+                  <span
+                    data-testid="flight-strip-epoch"
+                    className="text-[10px] font-mono tabular-nums text-cyan-300 shrink-0"
+                  >
+                    T+{universeScale.cosmicAgeGyr.toFixed(2)} Gyr
+                  </span>
+                  <span className="text-zinc-600 text-[10px] hidden sm:inline">·</span>
+                  <span className="hidden sm:inline text-[10px] font-mono tabular-nums text-amber-300 shrink-0">
+                    {universeScale.scientificLabel} ({universeScale.scaleFormatted})
+                  </span>
+                </div>
 
-          {!isFlightStripCollapsed && (
-            <div className="mt-1.5 pt-1.5 border-t border-white/10 flex flex-wrap items-center justify-between gap-1.5">
-              <div className="flex items-center gap-1 overflow-x-auto">
-                <span className="text-[9px] font-mono uppercase text-zinc-500 mr-0.5">
-                  Throttle:
-                </span>
-                {[
-                  { vel: -6.0, label: '-6/s' },
-                  { vel: -2.2, label: '-2.2/s' },
-                  { vel: 0.0, label: 'Hold' },
-                  { vel: 2.2, label: '+2.2/s' },
-                  { vel: 6.0, label: '+6/s' },
-                ].map((btn) => {
-                  const isActive =
-                    btn.vel === 0
-                      ? universeScale.autoZoomDir === 0
-                      : universeScale.autoZoomDir !== 0 &&
-                        Math.abs(universeScale.cruiseVelocityLogPerSec - btn.vel) < 0.25 &&
-                        Math.sign(btn.vel) === universeScale.autoZoomDir;
-                  return (
-                    <button
-                      key={btn.label}
-                      type="button"
-                      data-testid={`throttle-btn-${btn.vel}`}
-                      onClick={() => managerRef.current?.setCruiseVelocity(btn.vel)}
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono border cursor-pointer flex items-center gap-0.5 ${
-                        isActive
-                          ? 'bg-cyan-500/25 text-cyan-200 border-cyan-400/60 font-semibold'
-                          : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-white/10'
-                      }`}
-                    >
-                      {btn.vel === 0 ? (
-                        <Pause className="w-2.5 h-2.5" />
-                      ) : (
-                        <Play className="w-2.5 h-2.5" />
-                      )}
-                      <span>{btn.label}</span>
-                    </button>
-                  );
-                })}
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    data-testid="chrono-land-pad-btn"
+                    onClick={() => managerRef.current?.engageAutoLanding()}
+                    className="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/45 text-[10px] font-mono font-semibold cursor-pointer whitespace-nowrap"
+                  >
+                    Land on Pad
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="toggle-flight-strip-collapse"
+                    onClick={() => setIsFlightStripCollapsed((prev) => !prev)}
+                    aria-label={isFlightStripCollapsed ? 'Expand Chrono Controls' : 'Collapse Chrono Controls'}
+                    className="p-1 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-white/10 cursor-pointer"
+                  >
+                    {isFlightStripCollapsed ? (
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
               </div>
 
-              <button
-                type="button"
-                data-testid="toggle-vessel-view-btn"
-                onClick={() => {
-                  const nextView: ChronoVesselViewMode =
-                    universeScale.vesselMode === 'telescope_first_person'
-                      ? 'chase_pod'
-                      : 'telescope_first_person';
-                  managerRef.current?.setVesselMode(nextView);
-                }}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 hover:bg-zinc-800 text-sky-300 border border-sky-400/30 cursor-pointer shrink-0"
-              >
-                <Eye className="w-3 h-3" />
-                <span>
-                  {universeScale.vesselMode === 'telescope_first_person'
-                    ? 'Telescope 1P'
-                    : 'Chase Pod 3P'}
-                </span>
-              </button>
-            </div>
+              {!isFlightStripCollapsed && (
+                <div className="mt-1.5 pt-1.5 border-t border-white/10 flex flex-wrap items-center justify-between gap-1.5">
+                  <div className="flex items-center gap-1 overflow-x-auto">
+                    <span className="text-[9px] font-mono uppercase text-zinc-500 mr-0.5">
+                      Throttle:
+                    </span>
+                    {[
+                      { vel: -6.0, label: '-6/s' },
+                      { vel: -2.2, label: '-2.2/s' },
+                      { vel: 0.0, label: 'Hold' },
+                      { vel: 2.2, label: '+2.2/s' },
+                      { vel: 6.0, label: '+6/s' },
+                    ].map((btn) => {
+                      const isActive =
+                        btn.vel === 0
+                          ? universeScale.autoZoomDir === 0
+                          : universeScale.autoZoomDir !== 0 &&
+                            Math.abs(universeScale.cruiseVelocityLogPerSec - btn.vel) < 0.25 &&
+                            Math.sign(btn.vel) === universeScale.autoZoomDir;
+                      return (
+                        <button
+                          key={btn.label}
+                          type="button"
+                          data-testid={`throttle-btn-${btn.vel}`}
+                          onClick={() => managerRef.current?.setCruiseVelocity(btn.vel)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono border cursor-pointer flex items-center gap-0.5 ${
+                            isActive
+                              ? 'bg-cyan-500/25 text-cyan-200 border-cyan-400/60 font-semibold'
+                              : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-white/10'
+                          }`}
+                        >
+                          {btn.vel === 0 ? (
+                            <Pause className="w-2.5 h-2.5" />
+                          ) : (
+                            <Play className="w-2.5 h-2.5" />
+                          )}
+                          <span>{btn.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    data-testid="toggle-vessel-view-btn"
+                    onClick={() => {
+                      const nextView: ChronoVesselViewMode =
+                        universeScale.vesselMode === 'telescope_first_person'
+                          ? 'chase_pod'
+                          : 'telescope_first_person';
+                      managerRef.current?.setVesselMode(nextView);
+                    }}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 hover:bg-zinc-800 text-sky-300 border border-sky-400/30 cursor-pointer shrink-0"
+                  >
+                    <Eye className="w-3 h-3" />
+                    <span>
+                      {universeScale.vesselMode === 'telescope_first_person'
+                        ? 'Telescope 1P'
+                        : 'Chase Pod 3P'}
+                    </span>
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
