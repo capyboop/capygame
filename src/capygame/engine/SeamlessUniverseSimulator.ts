@@ -43,6 +43,16 @@ import {
   installFastMatrixCull,
 } from './gpu/FramePerformanceGovernor';
 import { convertLegacyShaderMaterialsToTsl } from './gpu/WebGpuPipeline';
+import {
+  buildForestMicroDiorama,
+  ForestMicroDioramaHandle,
+} from './ForestMicroDioramaBuilder';
+import {
+  ForestMicroSpecimenId,
+  ForestMicroSpecimenSpec,
+  getForestSpecimenSpec,
+  pickRandomForestSpecimen,
+} from './forestMicroSpecimens';
 
 interface TrackedMaterialEntry {
   mat: THREE.Material;
@@ -200,6 +210,13 @@ export class SeamlessUniverseSimulator {
   private solarOortPoints: THREE.Points | null = null;
   private orbitTimeScaleId: OrbitTimeScaleId = '1_orbit_min';
 
+  // Multiverse & subatomic per-layer dynamic shader/sprite references
+  private multiverseHomeBubbleMesh: THREE.Mesh | null = null;
+  private multiverseHomeBubbleMat: THREE.ShaderMaterial | null = null;
+  private atomicOrbitalsWaveHalo: THREE.Sprite | null = null;
+  private singleElectronHalo: THREE.Sprite | null = null;
+  private singlePhotonCore: THREE.Sprite | null = null;
+
   // Unified Galactic Disc + Spiral Arms (Orion-Cygnus Spur) references
   private spiralGalaxyTiltGroup: THREE.Group | null = null;
   private spiralGalaxySpinGroup: THREE.Group | null = null;
@@ -271,6 +288,12 @@ export class SeamlessUniverseSimulator {
   private ecosystemRiverMat: THREE.MeshStandardMaterial | null = null;
   private galaxyMorphology: GalaxyMorphology = 'spiral';
   private spiralGalaxyDiscMat: THREE.ShaderMaterial | null = null;
+  private forestDiorama: ForestMicroDioramaHandle | null = null;
+  private activeForestSpecimenId: ForestMicroSpecimenId = pickRandomForestSpecimen();
+  private celestialStarPoints: THREE.Points | null = null;
+  private celestialStarMat: THREE.ShaderMaterial | null = null;
+  private quantumFieldPoints: THREE.Points | null = null;
+  private quantumFieldMat: THREE.ShaderMaterial | null = null;
   private pendingProceduralBiome: {
     bigBangSpeed?: number;
     fineStructureInverse?: number;
@@ -282,6 +305,19 @@ export class SeamlessUniverseSimulator {
     grassPrimaryHex?: number;
     waterColorHex?: number;
   } | null = null;
+
+  public getActiveForestSpecimenSpec(): ForestMicroSpecimenSpec {
+    return getForestSpecimenSpec(this.activeForestSpecimenId);
+  }
+
+  public rerollForestSpecimen(specificId?: ForestMicroSpecimenId): ForestMicroSpecimenSpec {
+    this.activeForestSpecimenId =
+      specificId ?? pickRandomForestSpecimen(Math.random, this.activeForestSpecimenId);
+    if (this.forestDiorama) {
+      this.forestDiorama.setActiveSpecimen(this.activeForestSpecimenId);
+    }
+    return this.getActiveForestSpecimenSpec();
+  }
 
   public setGalaxyMorphology(morphology: GalaxyMorphology): void {
     this.galaxyMorphology = morphology;
@@ -557,7 +593,54 @@ export class SeamlessUniverseSimulator {
     });
     const stars = new THREE.Points(geo, psfMat);
     stars.frustumCulled = false;
+    this.celestialStarPoints = stars;
+    this.celestialStarMat = psfMat;
     this.celestialBackdropGroup.add(stars);
+
+    // Subtle deep-quantum QED vacuum fluctuation backdrop (-15.5m .. -35.0m) preventing pitch-black voids between subatomic scales
+    const qCount = this.isSoftwareGl ? 90 : 180;
+    const qPos = new Float32Array(qCount * 3);
+    const qCol = new Float32Array(qCount * 3);
+    const qScales = new Float32Array(qCount);
+    const qLums = new Float32Array(qCount);
+    for (let i = 0; i < qCount; i++) {
+      const r = 460 + seededRand(i * 5 + 1) * 380;
+      const th = Math.acos(2 * seededRand(i * 5 + 2) - 1);
+      const ph = seededRand(i * 5 + 3) * Math.PI * 2;
+      qPos[i * 3] = r * Math.sin(th) * Math.cos(ph);
+      qPos[i * 3 + 1] = r * Math.cos(th);
+      qPos[i * 3 + 2] = r * Math.sin(th) * Math.sin(ph);
+      const huePick = seededRand(i * 5 + 4);
+      _scratchColorA.setHSL(
+        huePick < 0.45 ? 0.54 : huePick < 0.8 ? 0.76 : 0.13,
+        0.85,
+        0.65
+      );
+      qCol[i * 3] = _scratchColorA.r;
+      qCol[i * 3 + 1] = _scratchColorA.g;
+      qCol[i * 3 + 2] = _scratchColorA.b;
+      qScales[i] = 0.65 + seededRand(i * 5 + 5) * 1.45;
+      qLums[i] = 0.25 + seededRand(i * 7 + 1) * 0.45;
+    }
+    const qGeo = new THREE.BufferGeometry();
+    qGeo.setAttribute('position', new THREE.BufferAttribute(qPos, 3));
+    qGeo.setAttribute('color', new THREE.BufferAttribute(qCol, 3));
+    qGeo.setAttribute('aScale', new THREE.BufferAttribute(qScales, 1));
+    qGeo.setAttribute('aLuminosity', new THREE.BufferAttribute(qLums, 1));
+    const qMat = createStarPsfMaterial({
+      baseSize: 48.0,
+      minPixelSize: 1.5,
+      maxPixelSize: 12.0,
+      diffractionStrength: 0.0,
+      opacity: 0.45,
+    });
+    const qPoints = new THREE.Points(qGeo, qMat);
+    qPoints.frustumCulled = false;
+    qPoints.visible = false;
+    this.quantumFieldPoints = qPoints;
+    this.quantumFieldMat = qMat;
+    this.celestialBackdropGroup.add(qPoints);
+
     this.celestialBackdropMats = this.collectLayerMaterials(this.celestialBackdropGroup);
   }
 
@@ -644,13 +727,13 @@ export class SeamlessUniverseSimulator {
           tickFn = this.populateForestCanopyMotesLayer(group, glowWarm);
           break;
         case 'leaf_fur_micro':
-          tickFn = this.populateLeafAndFurMicroLayer(group);
+          tickFn = this.populateLeafAndFurMicroLayer(group, glowWarm);
           break;
         case 'biological_cells':
           tickFn = this.populateBiologicalCellsLayer(group);
           break;
         case 'dna_molecules':
-          tickFn = this.populateDnaHelixLayer(group);
+          tickFn = this.populateDnaHelixLayer(group, glowCool);
           break;
         case 'atomic_orbitals':
           tickFn = this.populateAtomicOrbitalsLayer(group, glowCool);
@@ -741,6 +824,8 @@ export class SeamlessUniverseSimulator {
       opacity: 0.94,
     });
     const homeBubbleMesh = new THREE.Mesh(homeBubbleGeo, homeBubbleMat);
+    this.multiverseHomeBubbleMesh = homeBubbleMesh;
+    this.multiverseHomeBubbleMat = homeBubbleMat;
     group.add(homeBubbleMesh);
 
     // Radiant entrance corona halo sprite on home universe
@@ -841,18 +926,18 @@ export class SeamlessUniverseSimulator {
     group: THREE.Group,
     glowTex: THREE.CanvasTexture
   ): (dt: number, elapsed: number) => void {
-    // Replace wireframe icosahedron cages with volumetric quark-gluon plasma & inflationary PSF burst
-    for (let s = 0; s < 3; s++) {
+    // Two orthogonal crossed volumetric plasma slices eliminate 3x CPU/GPU fragment overdraw during dive
+    for (let s = 0; s < 2; s++) {
       const plasmaPlane = new THREE.Mesh(
-        new THREE.PlaneGeometry(36, 36),
+        new THREE.PlaneGeometry(28, 28),
         createVolumetricNebulaMaterial({
-          seedOffset: 11.4 + s * 4.7,
+          seedOffset: 11.4 + s * 5.3,
           hubblePaletteMix: 0.75,
-          opacity: 0.62,
+          opacity: 0.68,
           isInnerCore: s === 0,
         })
       );
-      plasmaPlane.rotation.set(s * 1.05, s * 0.92, s * 0.55);
+      plasmaPlane.rotation.set(s * 0.72, s * (Math.PI * 0.45), s * 0.35);
       group.add(plasmaPlane);
     }
 
@@ -935,10 +1020,10 @@ export class SeamlessUniverseSimulator {
     manifoldMesh.rotation.x = -Math.PI / 2.35;
     group.add(manifoldMesh);
 
-    // 2. Cosmic horizon boundary sphere
+    // 2. Cosmic horizon boundary sphere (kept translucent so Observable CMB sphere stays primary)
     const horizonSphere = new THREE.Mesh(
-      new THREE.SphereGeometry(22.0, this.isSoftwareGl ? 28 : 48, this.isSoftwareGl ? 20 : 36),
-      createCmbAnisotropyMaterial(0.38)
+      new THREE.SphereGeometry(22.0, this.isSoftwareGl ? 24 : 44, this.isSoftwareGl ? 18 : 32),
+      createCmbAnisotropyMaterial(0.22)
     );
     group.add(horizonSphere);
 
@@ -1647,11 +1732,11 @@ export class SeamlessUniverseSimulator {
       new THREE.Points(
         spurStarGeo,
         createStarPsfMaterial({
-          baseSize: 12.6,
-          minPixelSize: 1.5,
-          maxPixelSize: 38.0,
-          diffractionStrength: 0.52,
-          opacity: 0.96,
+          baseSize: 10.5,
+          minPixelSize: 1.4,
+          maxPixelSize: 22.0,
+          diffractionStrength: 0.44,
+          opacity: 0.94,
         })
       )
     );
@@ -1684,17 +1769,17 @@ export class SeamlessUniverseSimulator {
       this.spiralGalaxyArmRibbons.push(ribbonPlane);
     }
 
-    // 6. 3D Warm Old-Star Sersic Bulge Halo
+    // 6. 3D Warm Old-Star Sersic Bulge Halo (restrained opacity so edge-on spiral view stays crisp)
     const bulgeHalo = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: glowTex,
         color: 0xffedd5,
-        opacity: 0.62,
+        opacity: 0.36,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
     );
-    bulgeHalo.scale.set(11.0, 7.2, 1.0);
+    bulgeHalo.scale.set(9.5, 6.2, 1.0);
     galaxySpin.add(bulgeHalo);
     this.spiralGalaxyBulgeHalo = bulgeHalo;
 
@@ -1703,18 +1788,18 @@ export class SeamlessUniverseSimulator {
     armSpurAnchor.position.set(armX, 0, armZ);
     galaxySpin.add(armSpurAnchor);
 
-    const homeSpurBeacon = this.createSinglePointGlint(0x60a5fa, 14.0, 0.45);
+    const homeSpurBeacon = this.createSinglePointGlint(0x38bdf8, 19.0, 0.88);
     homeSpurBeacon.position.set(armX, 0, armZ);
     galaxySpin.add(homeSpurBeacon);
 
     this.registerMarkerAnchor({
       id: 'marker_orion_capy_spur',
-      label: 'Orion-Cygnus Spur (Milky Way)',
-      sublabel: '26,000 ly from Core · Solar Neighborhood · 10^+19.4 m',
+      label: 'CapySol System · Orion Spur',
+      sublabel: 'CapyWay Galaxy · 26,000 ly from Core · 10^+19.4 m',
       node: armSpurAnchor,
       layerBandId: 'galaxy',
       minLog: 18.6,
-      maxLog: 22.0,
+      maxLog: 23.0,
       targetLogMeters: 19.4,
       colorCss: '#60a5fa',
       physicalRadiusWorldAtOneToOne: 0.008,
@@ -1804,7 +1889,7 @@ export class SeamlessUniverseSimulator {
       pillarHolder.position.set(cfg.x, cfg.y, cfg.z);
       pillarHolder.rotation.z = cfg.tiltZ;
 
-      const matA = createDustPillarMaterial({ seed: cfg.seed, hubblePaletteMix: 0.5, opacity: 0.96 });
+      const matA = createDustPillarMaterial({ seed: cfg.seed, hubblePaletteMix: 0.5, opacity: 0.78 });
       const quadA = new THREE.Mesh(new THREE.PlaneGeometry(cfg.w, cfg.h), matA);
       quadA.renderOrder = 2 + i * 2;
       pillarHolder.add(quadA);
@@ -1813,7 +1898,7 @@ export class SeamlessUniverseSimulator {
         const matB = createDustPillarMaterial({
           seed: cfg.seed + 0.85,
           hubblePaletteMix: 0.5,
-          opacity: 0.72,
+          opacity: 0.56,
         });
         const quadB = new THREE.Mesh(new THREE.PlaneGeometry(cfg.w * 0.92, cfg.h), matB);
         quadB.rotation.y = Math.PI * 0.38;
@@ -1953,12 +2038,12 @@ export class SeamlessUniverseSimulator {
     ecliptic.add(sunAnchor);
     this.registerMarkerAnchor({
       id: 'marker_sun_g2v',
-      label: 'G2V Central Star',
-      sublabel: '1.39M km · 0.0093 AU',
+      label: 'CapySol Star (G2V)',
+      sublabel: '1.39M km · Heart of CapySol System',
       node: sunAnchor,
       layerBandId: 'stellar_systems',
       minLog: 10.2,
-      maxLog: 14.8,
+      maxLog: 15.2,
       targetLogMeters: 9.14,
       colorCss: '#facc15',
       physicalRadiusWorldAtOneToOne: 0.0034,
@@ -2010,8 +2095,8 @@ export class SeamlessUniverseSimulator {
       },
       {
         id: 'capy_earth',
-        name: 'Capy-Earth (Habitable)',
-        sub: '1.00 AU · 12,742 km',
+        name: 'CapyWorld Planet',
+        sub: '1.00 AU · 12,742 km · Habitable',
         aAu: 1.000,
         rAu: 6371.0 / 149597870.7,
         ecc: 0.017,
@@ -2963,88 +3048,20 @@ export class SeamlessUniverseSimulator {
     };
   }
 
-  // --- 17. CITRUS LEAF & CAPYBARA FUR MICROSTRUCTURE (-2.0 · 1.0 cm) ---
+  // --- 17. FOREST MICRO-GLADE · RANDOMIZED 11-SPECIMEN STORYBOOK CLEARING (-2.0 · 1.0 cm) ---
   private populateLeafAndFurMicroLayer(
-    group: THREE.Group
+    group: THREE.Group,
+    glowWarm: THREE.CanvasTexture
   ): (dt: number, elapsed: number) => void {
-    const leafGroup = new THREE.Group();
-    leafGroup.rotation.x = -0.46;
-    group.add(leafGroup);
-
-    // Sculpted ovate citrus leaf silhouette instead of a flat square plane
-    const leafShape = new THREE.Shape();
-    leafShape.moveTo(-12.5, 0);
-    leafShape.bezierCurveTo(-9.5, 6.2, -1.8, 7.8, 5.5, 5.2);
-    leafShape.bezierCurveTo(9.8, 3.4, 12.2, 1.1, 13.6, 0);
-    leafShape.bezierCurveTo(12.2, -1.1, 9.8, -3.4, 5.5, -5.2);
-    leafShape.bezierCurveTo(-1.8, -7.8, -9.5, -6.2, -12.5, 0);
-
-    const leafGeo = new THREE.ShapeGeometry(leafShape, 24);
-    const posAttr = leafGeo.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < posAttr.count; i++) {
-      const lx = posAttr.getX(i);
-      const ly = posAttr.getY(i);
-      // Natural midrib trough + gentle longitudinal botanical arch
-      const arch = -0.022 * lx * lx + Math.abs(ly) * 0.16;
-      posAttr.setZ(i, arch);
-    }
-    leafGeo.computeVertexNormals();
-
-    const leafBlade = new THREE.Mesh(
-      leafGeo,
-      new THREE.MeshStandardMaterial({
-        color: 0x16a34a,
-        emissive: 0x052e16,
-        emissiveIntensity: 0.32,
-        side: THREE.DoubleSide,
-        roughness: 0.34,
-        metalness: 0.06,
-      })
+    const diorama = buildForestMicroDiorama(
+      group,
+      glowWarm,
+      this.isSoftwareGl,
+      this.activeForestSpecimenId
     );
-    leafGroup.add(leafBlade);
-
-    // Petiole stem + primary vascular midrib + branching lateral venation
-    const veinMat = new THREE.MeshStandardMaterial({
-      color: 0xbef264,
-      emissive: 0x3f6212,
-      emissiveIntensity: 0.34,
-      roughness: 0.42,
-    });
-    const midrib = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.28, 26.8, 10), veinMat);
-    midrib.rotation.z = Math.PI / 2;
-    midrib.position.set(-0.2, 0, -0.35);
-    leafBlade.add(midrib);
-
-    for (let v = -4; v <= 4; v++) {
-      const xOff = v * 2.15;
-      const halfSpan = Math.max(1.2, 5.8 * Math.sqrt(Math.max(0.08, 1 - (xOff / 12.8) * (xOff / 12.8))));
-      for (const side of [-1, 1]) {
-        const subVein = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.035, 0.085, halfSpan, 7),
-          veinMat
-        );
-        subVein.position.set(xOff + 0.85, side * (halfSpan * 0.44), 0.12);
-        subVein.rotation.z = side * -0.62;
-        leafBlade.add(subVein);
-      }
-    }
-
-    // Fine tapered keratin fur bristles resting naturally beside the leaf apex rather than skewering through it
-    const hairMat = new THREE.MeshStandardMaterial({
-      color: 0xb45309,
-      roughness: 0.4,
-      metalness: 0.12,
-    });
-    for (let h = 0; h < 8; h++) {
-      const hair = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.24, 15.5, 10), hairMat);
-      hair.position.set(-7.5 + h * 2.1, 7.6 + (h % 2) * 1.1, -3.6 + (h % 3) * 1.4);
-      hair.rotation.z = 0.38 + (h % 3) * 0.06;
-      hair.rotation.x = 0.22;
-      group.add(hair);
-    }
-
-    return (_dt, elapsed) => {
-      leafGroup.rotation.z = Math.sin(elapsed * 0.8) * 0.03;
+    this.forestDiorama = diorama;
+    return (dt, elapsed) => {
+      diorama.tick(dt, elapsed);
     };
   }
 
@@ -3131,33 +3148,58 @@ export class SeamlessUniverseSimulator {
 
   // --- 19. B-DNA DOUBLE HELIX & MOLECULES (-8.47 · 3.4 nm PITCH, 2.0 nm DIAMETER) ---
   private populateDnaHelixLayer(
-    group: THREE.Group
+    group: THREE.Group,
+    glowCool: THREE.CanvasTexture
   ): (dt: number, elapsed: number) => void {
     const helix = new THREE.Group();
     helix.rotation.z = 0.28;
     group.add(helix);
 
-    // Accurate Watson-Crick B-DNA geometry: 10.5 base pairs per 3.4 nm helical turn,
-    // major groove (2.2 nm) vs minor groove (1.2 nm) phase offset (2.45 rad instead of pi)!
+    // Subtle luminous core backdrop sprite so DNA gleams visibly behind/around vessel during approach
+    const dnaHalo = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: glowCool,
+        color: 0x2dd4bf,
+        opacity: 0.44,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    dnaHalo.scale.setScalar(26.0);
+    group.add(dnaHalo);
+
+    // Accurate Watson-Crick B-DNA geometry with shared base-pair materials (4 shared materials vs 56 duplicates)
     const pairs = this.isSoftwareGl ? 28 : 44;
-    const heightSpan = 30.0;
-    const radius = 3.8;
+    const heightSpan = 38.0;
+    const radius = 5.4;
 
     const backboneMatA = new THREE.MeshStandardMaterial({
       color: 0x38bdf8,
       emissive: 0x0369a1,
-      emissiveIntensity: 0.42,
+      emissiveIntensity: 0.45,
       roughness: 0.24,
+      transparent: true,
     });
     const backboneMatB = new THREE.MeshStandardMaterial({
       color: 0xf472b6,
       emissive: 0x9d174d,
-      emissiveIntensity: 0.42,
+      emissiveIntensity: 0.45,
       roughness: 0.24,
+      transparent: true,
     });
     const baseColors = [0x34d399, 0xfbbf24, 0x60a5fa, 0xf43f5e];
-    const atomGeo = new THREE.SphereGeometry(0.58, 12, 12);
-    const rungGeo = new THREE.CylinderGeometry(0.18, 0.18, radius * 0.92, 8);
+    const baseMats = baseColors.map(
+      (hex) =>
+        new THREE.MeshStandardMaterial({
+          color: hex,
+          emissive: hex,
+          emissiveIntensity: 0.34,
+          roughness: 0.32,
+          transparent: true,
+        })
+    );
+    const atomGeo = new THREE.SphereGeometry(0.72, 12, 12);
+    const rungGeo = new THREE.CylinderGeometry(0.22, 0.22, radius * 0.92, 8);
 
     for (let i = 0; i < pairs; i++) {
       const t = i / (pairs - 1) - 0.5;
@@ -3179,28 +3221,12 @@ export class SeamlessUniverseSimulator {
       const chordLen = _scratchVecA.length();
       _scratchVecA.normalize();
 
-      const halfA = new THREE.Mesh(
-        rungGeo,
-        new THREE.MeshStandardMaterial({
-          color: baseColors[i % 4],
-          emissive: baseColors[i % 4],
-          emissiveIntensity: 0.28,
-          roughness: 0.35,
-        })
-      );
+      const halfA = new THREE.Mesh(rungGeo, baseMats[i % 4]);
       halfA.position.set(x1 + _scratchVecA.x * chordLen * 0.25, y, z1 + _scratchVecA.z * chordLen * 0.25);
       halfA.quaternion.setFromUnitVectors(_upUnitVec, _scratchVecA);
       halfA.scale.set(1, (chordLen * 0.48) / (radius * 0.92), 1);
 
-      const halfB = new THREE.Mesh(
-        rungGeo,
-        new THREE.MeshStandardMaterial({
-          color: baseColors[(i + 2) % 4],
-          emissive: baseColors[(i + 2) % 4],
-          emissiveIntensity: 0.28,
-          roughness: 0.35,
-        })
-      );
+      const halfB = new THREE.Mesh(rungGeo, baseMats[(i + 2) % 4]);
       halfB.position.set(x1 + _scratchVecA.x * chordLen * 0.75, y, z1 + _scratchVecA.z * chordLen * 0.75);
       halfB.quaternion.copy(halfA.quaternion);
       halfB.scale.copy(halfA.scale);
@@ -3310,9 +3336,10 @@ export class SeamlessUniverseSimulator {
     this.atomicCloudPoints = new THREE.Points(
       cloudGeo,
       createStarPsfMaterial({
-        baseSize: 13.5,
+        baseSize: 22.0,
+        maxPixelSize: 28.0,
         diffractionStrength: 0.0,
-        opacity: 0.62,
+        opacity: 0.90,
       })
     );
     group.add(this.atomicCloudPoints);
@@ -3321,12 +3348,13 @@ export class SeamlessUniverseSimulator {
       new THREE.SpriteMaterial({
         map: glowCool,
         color: 0x38bdf8,
-        opacity: 0.28,
+        opacity: 0.52,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
     );
-    waveHalo.scale.setScalar(26);
+    waveHalo.scale.setScalar(30);
+    this.atomicOrbitalsWaveHalo = waveHalo;
     group.add(waveHalo);
 
     this.electronMarkers = [];
@@ -3437,6 +3465,9 @@ export class SeamlessUniverseSimulator {
     group: THREE.Group,
     glowWarm: THREE.CanvasTexture
   ): (dt: number, elapsed: number) => void {
+    const qcdGlint = this.createSinglePointGlint(0xc084fc, 16.0, 0.55);
+    group.add(qcdGlint);
+
     // Soft translucent QCD hadron bag haze instead of wireframe sphere
     const bagHaze = new THREE.Mesh(
       new THREE.SphereGeometry(14.0, 32, 24),
@@ -3519,12 +3550,13 @@ export class SeamlessUniverseSimulator {
       new THREE.SpriteMaterial({
         map: glowCool,
         color: 0x22d3ee,
-        opacity: 0.78,
+        opacity: 0.52,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
     );
-    halo.scale.setScalar(11.0);
+    halo.scale.setScalar(13.0);
+    this.singleElectronHalo = halo;
     group.add(halo);
 
     const count = this.isSoftwareGl ? 600 : 2200;
@@ -3554,7 +3586,7 @@ export class SeamlessUniverseSimulator {
     geo.setAttribute('aLuminosity', new THREE.BufferAttribute(lum, 1));
     const torusCloud = new THREE.Points(
       geo,
-      createStarPsfMaterial({ baseSize: 12.0, diffractionStrength: 0.0, opacity: 0.78 })
+      createStarPsfMaterial({ baseSize: 16.0, maxPixelSize: 24.0, diffractionStrength: 0.0, opacity: 0.92 })
     );
     torusCloud.rotation.x = 0.35;
     this.singleElectronTorus = torusCloud;
@@ -3587,6 +3619,7 @@ export class SeamlessUniverseSimulator {
       eGeo,
       new THREE.LineBasicMaterial({
         color: 0xfde047,
+        transparent: true,
         opacity: 0.95,
         blending: THREE.AdditiveBlending,
       })
@@ -3595,6 +3628,7 @@ export class SeamlessUniverseSimulator {
       bGeo,
       new THREE.LineBasicMaterial({
         color: 0x38bdf8,
+        transparent: true,
         opacity: 0.95,
         blending: THREE.AdditiveBlending,
       })
@@ -3606,13 +3640,15 @@ export class SeamlessUniverseSimulator {
     const barGeo = new THREE.CylinderGeometry(0.08, 0.08, 1, 6);
     const eBarMat = new THREE.MeshBasicMaterial({
       color: 0xfef08a,
-      opacity: 0.65,
+      transparent: true,
+      opacity: 0.88,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const bBarMat = new THREE.MeshBasicMaterial({
       color: 0x38bdf8,
-      opacity: 0.65,
+      transparent: true,
+      opacity: 0.88,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -3635,16 +3671,21 @@ export class SeamlessUniverseSimulator {
     }
     group.add(this.photonVectorGroup);
 
+    const photonGlint = this.createSinglePointGlint(0xfef08a, 24.0, 0.65);
+    group.add(photonGlint);
+
     const core = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: glowWarm,
         color: 0xfef9c3,
-        opacity: 0.78,
+        transparent: true,
+        opacity: 0.92,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
     );
-    core.scale.setScalar(9.0);
+    core.scale.setScalar(12.0);
+    this.singlePhotonCore = core;
     group.add(core);
 
     group.rotation.y = -0.35;
@@ -3736,7 +3777,8 @@ export class SeamlessUniverseSimulator {
       new THREE.MeshBasicMaterial({
         vertexColors: true,
         wireframe: true,
-        opacity: 0.48,
+        transparent: true,
+        opacity: 0.52,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
@@ -3744,10 +3786,14 @@ export class SeamlessUniverseSimulator {
     foamMesh.position.y = -2.2;
     group.add(foamMesh);
 
+    const planckGlint = this.createSinglePointGlint(0xe879f9, 20.0, 0.55);
+    group.add(planckGlint);
+
     const spark = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: glowCool,
         color: 0xe0f2fe,
+        transparent: true,
         opacity: 0.88,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
@@ -3917,20 +3963,23 @@ export class SeamlessUniverseSimulator {
     this.rootGroup.matrixWorldAutoUpdate = true;
     this.rootGroup.position.copy(focalWorldPos);
 
-    // 1. Update Persistent 3D Celestial PSF Starfield & Milky Way Band above Troposphere (+4.0m .. +27.5m)
+    // 1. Update Persistent 3D Celestial PSF Starfield (+3.8m .. +29.0m) & Deep Quantum Vacuum Field (-15.5m .. -35.0m)
     const starSkyAlpha =
-      smoothstep01(3.8, 5.8, logScaleMeters) * (1 - smoothstep01(26.4, 27.6, logScaleMeters));
-    if (starSkyAlpha > 0.01) {
+      smoothstep01(3.8, 5.8, logScaleMeters) * (1 - smoothstep01(27.2, 29.0, logScaleMeters));
+    const quantumFieldAlpha =
+      0.46 * smoothstep01(-15.2, -18.2, logScaleMeters);
+    if (starSkyAlpha > 0.01 || quantumFieldAlpha > 0.01) {
       this.celestialBackdropGroup.visible = true;
       this.celestialBackdropGroup.matrixWorldAutoUpdate = true;
       this.celestialBackdropGroup.position.copy(focalWorldPos);
-      for (let m = 0; m < this.celestialBackdropMats.length; m++) {
-        const entry = this.celestialBackdropMats[m];
-        if (entry.shaderOpacityUniform) {
-          entry.shaderOpacityUniform.value = entry.baseOpacity * starSkyAlpha;
-        } else {
-          entry.mat.opacity = entry.baseOpacity * starSkyAlpha;
-        }
+      if (this.celestialStarPoints && this.celestialStarMat) {
+        this.celestialStarPoints.visible = starSkyAlpha > 0.01;
+        this.celestialStarMat.opacity = starSkyAlpha;
+      }
+      if (this.quantumFieldPoints && this.quantumFieldMat) {
+        this.quantumFieldPoints.visible = quantumFieldAlpha > 0.01;
+        this.quantumFieldMat.opacity = quantumFieldAlpha;
+        this.quantumFieldPoints.rotation.y += dt * 0.035;
       }
     } else {
       this.celestialBackdropGroup.visible = false;
@@ -4000,42 +4049,90 @@ export class SeamlessUniverseSimulator {
       const scaledDelta = deltaLog * gamma;
 
       // Neighbor-aware visibility bounds:
-      // At strict 1:1 (gamma = 1.0): parent layers fade out cleanly so giant cosmic structures
-      // never slice through nested sub-systems.
-      // Stellar systems (12.95) expands smoothly into planetary_system (8.85),
-      // planetary_system hands off to planet globe (7.10), and planet globe hands off to atmosphere (4.90).
-      const isGalaxy = layer.spec.id === 'galaxy';
-      const isStellarSystems = layer.spec.id === 'stellar_systems';
-      const isNebulas = layer.spec.id === 'nebulas';
-      const isPlanetarySystem = layer.spec.id === 'planetary_system';
-      const isPlanet = layer.spec.id === 'planet';
-      const isDna = layer.spec.id === 'dna_molecules';
+      // At strict 1:1 (gamma = 1.0): parent layers overlap neighboring bands seamlessly so no transition ever goes blank,
+      // while giant cosmic/planet structures still fade cleanly before camera membrane intersections.
+      const layerId = layer.spec.id;
+      const isMultiverse = layerId === 'multiverse';
+      const isBigBang = layerId === 'big_bang';
+      const isUniverse = layerId === 'universe';
+      const isObservable = layerId === 'observable';
+      const isGalaxy = layerId === 'galaxy';
+      const isStellarSystems = layerId === 'stellar_systems';
+      const isNebulas = layerId === 'nebulas';
+      const isPlanetarySystem = layerId === 'planetary_system';
+      const isPlanet = layerId === 'planet';
+      const isBiologicalCells = layerId === 'biological_cells';
+      const isDna = layerId === 'dna_molecules';
+      const isAtomicOrbitals = layerId === 'atomic_orbitals';
+      const isAtomicNucleus = layerId === 'atomic_nucleus';
+      const isQuarksGluons = layerId === 'quarks_gluons';
+      const isSingleElectron = layerId === 'single_electron';
+      const isSinglePhoton = layerId === 'single_photon';
+      const isPlanckFoam = layerId === 'planck_quantum_foam';
 
-      let maxExpandDex = 1.45;
-      if (isGalaxy) {
-        // Unified Milky Way Galaxy + Spiral Arms stays continuous from Galaxy overview (21.0)
-        // through Spiral Arms (19.4) and dissolves cleanly above Nebulas (17.2).
+      let maxExpandDex = 1.65;
+      if (isMultiverse) {
+        maxExpandDex = 2.6;
+      } else if (isBigBang) {
+        maxExpandDex = 2.2;
+      } else if (isUniverse) {
+        maxExpandDex = 2.6;
+      } else if (isObservable) {
+        maxExpandDex = 2.8;
+      } else if (isGalaxy) {
         maxExpandDex = 3.55;
       } else if (isStellarSystems) {
         maxExpandDex = 4.45;
       } else if (isNebulas) {
-        maxExpandDex = 3.55;
+        maxExpandDex = 2.05;
       } else if (isPlanetarySystem) {
         maxExpandDex = 1.65;
       } else if (isPlanet) {
         maxExpandDex = 6.50;
+      } else if (isBiologicalCells) {
+        maxExpandDex = 4.2;
       } else if (isDna) {
-        // Dissolve DNA double-helix cleanly before reaching Carbon-12 electron orbitals (-9.47)
-        maxExpandDex = 0.85;
+        // Bridge DNA double-helix smoothly into Carbon-12 electron orbitals (-9.47)
+        maxExpandDex = 1.45;
+      } else if (isAtomicOrbitals) {
+        maxExpandDex = 3.8;
+      } else if (isAtomicNucleus) {
+        maxExpandDex = 1.65;
+      } else if (isQuarksGluons) {
+        maxExpandDex = 1.45;
+      } else if (isSingleElectron) {
+        maxExpandDex = 1.45;
+      } else if (isSinglePhoton) {
+        maxExpandDex = 1.25;
       }
 
-      let maxShrinkDex = -2.35;
-      if (isStellarSystems) {
+      let maxShrinkDex = -2.45;
+      if (isBigBang) {
+        maxShrinkDex = -3.0;
+      } else if (isUniverse || isObservable) {
+        maxShrinkDex = -2.6;
+      } else if (isStellarSystems) {
         maxShrinkDex = -4.6;
       } else if (isPlanetarySystem) {
         maxShrinkDex = -2.6;
       } else if (isPlanet) {
         maxShrinkDex = -3.45;
+      } else if (isBiologicalCells) {
+        maxShrinkDex = -3.2;
+      } else if (isDna) {
+        maxShrinkDex = -4.2;
+      } else if (isAtomicOrbitals) {
+        maxShrinkDex = -2.8;
+      } else if (isAtomicNucleus) {
+        maxShrinkDex = -4.8;
+      } else if (isQuarksGluons) {
+        maxShrinkDex = -4.8;
+      } else if (isSingleElectron) {
+        maxShrinkDex = -5.8;
+      } else if (isSinglePhoton) {
+        maxShrinkDex = -5.8;
+      } else if (isPlanckFoam) {
+        maxShrinkDex = -5.8;
       }
 
       if (scaledDelta > maxExpandDex || scaledDelta < maxShrinkDex) {
@@ -4048,13 +4145,12 @@ export class SeamlessUniverseSimulator {
 
       let alpha = 1.0;
       if (isPlanet) {
-        // Unified Single Planet remains 100% continuous from Moon orbit (8.85) down through
-        // planet globe (7.10), stratosphere (4.90), and cordilleras (3.60), fading out only
-        // as ecosystems/forest take over on touchdown (2.35 -> 1.35).
+        // Unified Single Planet remains continuous down through stratosphere & land_masses, fading cleanly
+        // across 3.35 -> 2.55 so planetLod3 blends smoothly into Sanctuary without popping or bare water gaps
         if (scaledDelta < 0) {
           alpha = smoothstep01(maxShrinkDex, -2.05, scaledDelta);
         } else {
-          alpha = smoothstep01(1.35, 2.35, logScaleMeters);
+          alpha = smoothstep01(2.55, 3.35, logScaleMeters);
         }
       } else if (isGalaxy) {
         if (scaledDelta < 0) {
@@ -4065,13 +4161,27 @@ export class SeamlessUniverseSimulator {
       } else if (scaledDelta < 0) {
         alpha = smoothstep01(maxShrinkDex, -0.32, scaledDelta);
       } else {
-        alpha = 1.0 - smoothstep01(0.30, maxExpandDex, scaledDelta);
+        const isQuantumFadeLayer =
+          isAtomicNucleus || isQuarksGluons || isSingleElectron || isSinglePhoton;
+        const expandFadeStart = isQuantumFadeLayer
+          ? 0.22
+          : maxExpandDex > 2.2
+            ? maxExpandDex * 0.48
+            : 0.35;
+        alpha = 1.0 - smoothstep01(expandFadeStart, maxExpandDex, scaledDelta);
       }
       alpha *= focusBoost;
 
-      // Smooth atmospheric-to-surface fade near planetary touchdown (+1.7 -> +0.9) so land_masses/ecosystems never clip
-      if (
-        (layer.spec.id === 'ecosystems' || layer.spec.id === 'land_masses' || layer.spec.id === 'atmosphere') &&
+      // Prevent floating ecosystem pine cones over bare ocean above 2.85, and crossfade cleanly below 2.0
+      if (layer.spec.id === 'ecosystems') {
+        if (logScaleMeters > 2.45) {
+          alpha *= smoothstep01(2.85, 2.45, logScaleMeters);
+        }
+        if (logScaleMeters < 2.0) {
+          alpha *= smoothstep01(0.95, 2.05, logScaleMeters);
+        }
+      } else if (
+        (layer.spec.id === 'land_masses' || layer.spec.id === 'atmosphere') &&
         logScaleMeters < 2.0
       ) {
         alpha *= smoothstep01(0.95, 2.05, logScaleMeters);
@@ -4125,6 +4235,17 @@ export class SeamlessUniverseSimulator {
         entry.mat.depthWrite = alpha > 0.85 && logScaleMeters > 1.85 ? entry.defaultDepthWrite : false;
       }
 
+      if (isMultiverse && this.multiverseHomeBubbleMesh && this.multiverseHomeBubbleMat) {
+        // Fade the foreground r=9.8 home-universe shell before camera passes through it (~29.4)
+        const homeShellFade = alpha * smoothstep01(29.15, 29.75, logScaleMeters);
+        this.multiverseHomeBubbleMesh.visible = homeShellFade > 0.01;
+        if (this.multiverseHomeBubbleMat.uniforms?.uOpacity) {
+          this.multiverseHomeBubbleMat.uniforms.uOpacity.value = 0.94 * homeShellFade;
+        } else {
+          this.multiverseHomeBubbleMat.opacity = 0.94 * homeShellFade;
+        }
+      }
+
       if (layer.tickFn) {
         layer.tickFn(dt, this.elapsed, gamma, showObjectMarkers);
       }
@@ -4150,8 +4271,9 @@ export class SeamlessUniverseSimulator {
         }
         if (this.spiralGalaxyBulgeHalo) {
           const bMat = this.spiralGalaxyBulgeHalo.material as THREE.SpriteMaterial;
-          bMat.opacity = 0.62 * discFade;
-          this.spiralGalaxyBulgeHalo.visible = discFade > 0.01;
+          const bulgeFade = discFade * smoothstep01(18.6, 20.2, logScaleMeters);
+          bMat.opacity = 0.36 * bulgeFade;
+          this.spiralGalaxyBulgeHalo.visible = bulgeFade > 0.01;
         }
         const ribbonScale = THREE.MathUtils.lerp(
           0.34,
@@ -4244,8 +4366,8 @@ export class SeamlessUniverseSimulator {
         const detailScale = smoothstep01(6.8, 3.0, logScaleMeters);
         const cloudClear = smoothstep01(5.4, 3.8, logScaleMeters);
 
-        // 1. Full globe sphere (visible from Planetary System 8.85 down to stratosphere 4.05)
-        const globeOpacity = alpha * smoothstep01(4.05, 4.75, logScaleMeters);
+        // 1. Full globe sphere (visible from Planetary System 8.85 down to 4.70, fading out 5.20 -> 4.70)
+        const globeOpacity = alpha * smoothstep01(4.70, 5.20, logScaleMeters);
         if (this.planetGlobeMesh && this.planetGlobeMat) {
           this.planetGlobeMesh.visible = globeOpacity > 0.01;
           if (this.planetGlobeMat.uniforms?.uOpacity) {
@@ -4257,9 +4379,9 @@ export class SeamlessUniverseSimulator {
           this.planetGlobeMat.depthWrite = globeOpacity > 0.82 && logScaleMeters > 1.85;
         }
 
-        // 2. Full globe cloud sphere (hands off smoothly to curved troposphere patches at 5.2 -> 4.25)
+        // 2. Full globe cloud sphere (hands off cleanly to curved troposphere patch at 5.05 -> 4.60)
         const cloudSphereOpacity =
-          Math.min(1.0, 0.86 * densityMod * alpha * smoothstep01(4.25, 5.20, logScaleMeters));
+          Math.min(1.0, 0.86 * densityMod * alpha * smoothstep01(4.60, 5.05, logScaleMeters));
         if (this.planetCloudMesh && this.planetCloudSphereMat) {
           this.planetCloudMesh.visible = cloudSphereOpacity > 0.01;
           if (this.planetCloudSphereMat.uniforms?.uOpacity) {
@@ -4303,16 +4425,20 @@ export class SeamlessUniverseSimulator {
           }
         }
 
-        // 6. Nested Float32-safe curved surface LOD patches (zero seam, 100% overlapping handoffs)
+        // 6. Nested Float32-safe curved surface LOD patches (strict mutual-exclusion bands + 0.40 dex crossfades)
+        // Ensures at most 1-2 surface passes run per frame instead of 3+ overlapping full-screen fragment shaders.
         const lod1Op =
           alpha *
-          smoothstep01(5.95, 5.10, logScaleMeters) *
-          smoothstep01(3.05, 3.60, logScaleMeters);
+          smoothstep01(5.25, 4.75, logScaleMeters) *
+          smoothstep01(3.85, 4.25, logScaleMeters);
         const lod2Op =
           alpha *
-          smoothstep01(4.65, 3.95, logScaleMeters) *
-          smoothstep01(2.10, 2.55, logScaleMeters);
-        const lod3Op = alpha * smoothstep01(3.35, 2.80, logScaleMeters);
+          smoothstep01(4.25, 3.85, logScaleMeters) *
+          smoothstep01(3.05, 3.40, logScaleMeters);
+        const lod3Op =
+          alpha *
+          smoothstep01(3.50, 3.05, logScaleMeters) *
+          smoothstep01(2.55, 2.95, logScaleMeters);
 
         const lodPairs: Array<[THREE.Mesh | null, THREE.ShaderMaterial | undefined, number]> = [
           [this.planetLod1Mesh, this.planetLodMats[0], lod1Op],
@@ -4325,23 +4451,24 @@ export class SeamlessUniverseSimulator {
           mesh.visible = op > 0.01;
           if (mat.uniforms?.uOpacity) mat.uniforms.uOpacity.value = op;
           if (mat.uniforms?.uDetailScale) mat.uniforms.uDetailScale.value = detailScale;
-          mat.depthWrite = op > 0.82 && logScaleMeters > 1.85;
+          mat.depthWrite = op > 0.82 && logScaleMeters > 2.85;
         }
 
-        // 7. Curved Troposphere / Stratosphere Cloud Deck Patches
+        // 7. Curved Troposphere / Stratosphere Cloud Deck Patches (fades out cleanly before Land Masses core)
         const cloudPatchFade =
           Math.min(
             1.0,
             0.84 *
               densityMod *
               alpha *
-              smoothstep01(6.20, 5.25, logScaleMeters) *
-              smoothstep01(3.15, 3.95, logScaleMeters)
+              smoothstep01(5.05, 4.55, logScaleMeters) *
+              smoothstep01(3.45, 4.05, logScaleMeters)
           );
         for (let c = 0; c < this.planetCloudPatchMeshes.length; c++) {
           const cMesh = this.planetCloudPatchMeshes[c];
           const cMat = this.planetCloudPatchMats[c];
-          cMesh.visible = cloudPatchFade > 0.01;
+          const allowCloudDeck = !this.isSoftwareGl || c === 0;
+          cMesh.visible = allowCloudDeck && cloudPatchFade > 0.01;
           if (cMat?.uniforms?.uOpacity) {
             cMat.uniforms.uOpacity.value = cloudPatchFade * (c === 0 ? 1.0 : 0.72);
           }

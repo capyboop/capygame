@@ -785,8 +785,8 @@ export class HardwareGpuEngine {
       }
     }
 
-    // 2. Shadow Map Mode & Resolution
-    if (this.config.shadowQuality === 'off') {
+    // 2. Shadow Map Mode & Resolution (Hardware WebGL2/WebGPU only; software WebGL uses soft contact shadow)
+    if (this.config.shadowQuality === 'off' || this.isSoftwareGl) {
       this.renderer.shadowMap.enabled = false;
       if (!this.isWebGpu) {
         (this.renderer as THREE.WebGLRenderer).shadowMap.autoUpdate = false;

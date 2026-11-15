@@ -32,6 +32,22 @@ float noise3D(vec3 x) {
   );
 }
 
+float fbm3(vec3 p) {
+  float v = 0.0;
+  float a = 0.5;
+  mat3 rot = mat3(
+    0.00,  0.80,  0.60,
+   -0.80,  0.36, -0.48,
+   -0.60, -0.48,  0.64
+  );
+  for (int i = 0; i < 3; i++) {
+    v += a * noise3D(p);
+    p = rot * p * 2.04 + vec3(13.7, 7.3, 5.1);
+    a *= 0.5;
+  }
+  return v;
+}
+
 float fbm4(vec3 p) {
   float v = 0.0;
   float a = 0.5;
@@ -60,6 +76,21 @@ float fbm5(vec3 p) {
     v += a * noise3D(p);
     p = rot * p * 2.05 + vec3(17.1, 9.2, 3.7);
     a *= 0.5;
+  }
+  return v;
+}
+
+float ridgedFbm3(vec3 p) {
+  float v = 0.0;
+  float a = 0.55;
+  float weight = 1.0;
+  for (int i = 0; i < 3; i++) {
+    float n = 1.0 - abs(noise3D(p) * 2.0 - 1.0);
+    n = n * n * weight;
+    weight = clamp(n * 1.8, 0.0, 1.0);
+    v += n * a;
+    p = p * 2.12 + vec3(5.3, 11.9, 8.4);
+    a *= 0.48;
   }
   return v;
 }
@@ -338,15 +369,15 @@ export function createVolumetricNebulaMaterial(opts: {
         if (radialMask <= 0.002) discard;
 
         vec3 sampleCoord = vLocalPos * 0.14 + vec3(uSeed * 3.7, uSeed * 1.9, uTime * 0.012);
-        // Domain-warped turbulent gas filaments (Orion / Carina H-II shock structure)
+        // Fast streamlined turbulent gas filaments (Orion / Carina H-II shock structure)
         vec3 warp = vec3(
-          fbm4(sampleCoord * 1.15 + vec3(1.2, 4.5, 2.1)),
-          fbm4(sampleCoord * 1.15 + vec3(6.8, 2.3, 8.4)),
-          fbm4(sampleCoord * 1.15 + vec3(3.9, 9.1, 5.2))
+          fbm3(sampleCoord * 1.15 + vec3(1.2, 4.5, 2.1)),
+          fbm3(sampleCoord * 1.15 + vec3(6.8, 2.3, 8.4)),
+          0.5
         );
-        float gas = fbm5(sampleCoord * 1.6 + (warp - 0.5) * 2.35);
-        float ridges = ridgedFbm4(sampleCoord * 2.1 + (warp - 0.5) * 1.8);
-        float dust = fbm4(sampleCoord * 2.6 - warp * 1.4 + vec3(11.0));
+        float gas = fbm4(sampleCoord * 1.6 + (warp - 0.5) * 2.2);
+        float ridges = ridgedFbm3(sampleCoord * 2.1 + (warp - 0.5) * 1.7);
+        float dust = fbm3(sampleCoord * 2.6 - warp * 1.3 + vec3(11.0));
 
         // Central stellar-wind cavity (Trapezium-like blown bubble) + bright ionization wall
         float cavity = smoothstep(0.06, 0.44, r2d + (gas - 0.5) * 0.26);
@@ -437,8 +468,8 @@ export function createDustPillarMaterial(opts: {
         float x = (vUv.x - 0.5) * 2.0;
 
         vec3 p = vec3(x * 2.4, y * 4.6, uSeed * 5.3 + uTime * 0.01);
-        float billow = fbm5(p * 1.45);
-        float crags  = ridgedFbm4(p * 2.6 + vec3(billow * 1.2));
+        float billow = fbm3(p * 1.45);
+        float crags  = ridgedFbm3(p * 2.6 + vec3(billow * 1.2));
 
         // Tapering trunk width with organic FBM billowing fingers near top
         float halfWidth = mix(0.62, 0.20, pow(y, 0.82)) + (billow - 0.5) * 0.38;
@@ -544,8 +575,8 @@ export function createSpiralGalaxyDiscMaterial(opts: {
           vec2 orionLocal = p - vec2(0.495 * cos(1.22), 0.495 * sin(1.22));
           float orionSpur = exp(-dot(orionLocal, orionLocal) * 32.0) * 0.65;
 
-          float turb = fbm5(nCoord + vec3(cos(spiralPhase) * 0.4, sin(spiralPhase) * 0.4, 0.0));
-          float dustNoise = ridgedFbm4(nCoord * 1.9 + vec3(3.1));
+          float turb = fbm3(nCoord + vec3(cos(spiralPhase) * 0.4, sin(spiralPhase) * 0.4, 0.0));
+          float dustNoise = ridgedFbm3(nCoord * 1.9 + vec3(3.1));
 
           float bulge = exp(-pow(r / 0.19, 1.35)) * 2.4 + exp(-r * r * 140.0) * 2.2;
           float discEnv = exp(-r * 3.1) * (1.0 - smoothstep(0.76, 1.0, r));
@@ -576,8 +607,8 @@ export function createSpiralGalaxyDiscMaterial(opts: {
           vec2 orionLocal = p - vec2(0.495 * cos(1.22), 0.495 * sin(1.22));
           float orionSpur = exp(-dot(orionLocal, orionLocal) * 30.0) * 0.6;
 
-          float turb = fbm5(nCoord * 1.1 + vec3(0.4, 0.8, 0.0));
-          float dustNoise = ridgedFbm4(nCoord * 2.2 + vec3(1.7));
+          float turb = fbm3(nCoord * 1.1 + vec3(0.4, 0.8, 0.0));
+          float dustNoise = ridgedFbm3(nCoord * 2.2 + vec3(1.7));
           float discEnv = exp(-r * 2.9) * (1.0 - smoothstep(0.78, 1.0, r));
           float barArmDensity = discEnv * (0.24 + 1.35 * (barArm + orionSpur) * (0.6 + 0.7 * turb));
 
@@ -605,7 +636,7 @@ export function createSpiralGalaxyDiscMaterial(opts: {
           float ellipCore = exp(-pow(ellipR / 0.13, 1.2)) * 3.4;
           float ellipHalo = exp(-ellipR * 2.3) * (1.0 - smoothstep(0.80, 1.0, ellipR));
 
-          float subtleGranulation = fbm4(vec3(p * 2.5, uTime * 0.005)) * 0.12;
+          float subtleGranulation = fbm3(vec3(p * 2.5, uTime * 0.005)) * 0.12;
 
           vec3 ellipCenterCol = vec3(1.0, 0.90, 0.72);
           vec3 ellipMidCol    = vec3(0.96, 0.78, 0.54);
@@ -620,9 +651,9 @@ export function createSpiralGalaxyDiscMaterial(opts: {
           // --- 3. CLUMPY IRREGULAR / STARBURST GALAXY (Irr / LMC) ---
           vec2 irrP = p - vec2(0.12, -0.09);
           float irrR = length(irrP);
-          float irrTurb = fbm5(vec3(p * 3.6, uTime * 0.012));
-          float irrTurb2 = fbm4(vec3((p + 1.4) * 5.4, uTime * 0.018));
-          float dustNoise = ridgedFbm4(vec3(p * 3.2, 0.5));
+          float irrTurb = fbm3(vec3(p * 3.6, uTime * 0.012));
+          float irrTurb2 = fbm3(vec3((p + 1.4) * 5.4, uTime * 0.018));
+          float dustNoise = ridgedFbm3(vec3(p * 3.2, 0.5));
 
           float irrCore = exp(-pow(irrR / 0.24, 1.4)) * 2.4;
           float discEnv = exp(-length(p) * 2.2) * (1.0 - smoothstep(0.74, 1.0, length(p)));
@@ -728,8 +759,8 @@ export function createCmbAnisotropyMaterial(opacity: number = 0.82): THREE.Shade
 
       void main() {
         // Acoustic baryon-photon oscillation peaks (1 deg scale speckles + Sachs-Wolfe quadrupole)
-        float largeScale = fbm4(vDir * 2.6);
-        float acousticPeak = fbm5(vDir * 14.5 + vec3(largeScale * 0.8));
+        float largeScale = fbm3(vDir * 2.6);
+        float acousticPeak = fbm4(vDir * 14.5 + vec3(largeScale * 0.8));
         float fineScale = noise3D(vDir * 36.0) * 0.22;
         float dt = clamp(0.48 * acousticPeak + 0.34 * largeScale + fineScale, 0.0, 1.0);
 
@@ -873,99 +904,85 @@ export function createHabitablePlanetMaterial(
       uniform float uDetailScale;
       uniform vec3 uSanctuaryDir;
 
-      float evalTerrainHeight(vec3 p, float detailWeight, out float ridgesOut, out float detailOut) {
-        vec3 warp = vec3(
-          fbm4(p * 2.1 + vec3(1.7)),
-          fbm4(p * 2.1 + vec3(8.3)),
-          fbm4(p * 2.1 + vec3(4.9))
-        );
-        float cont = fbm5(p * 2.65 + (warp - 0.5) * 0.85);
-        float ridges = ridgedFbm4(p * 9.5 + warp * 1.4);
-        float detail = fbm4(p * 22.0);
-
-        // Anchor the primary Sanctuary continent & archipelago smoothly around uSanctuaryDir (22.5N, 42.0E)
-        float dSanc = length(p - normalize(uSanctuaryDir));
-        float continentPedestal = exp(-pow(dSanc / 0.23, 2.1)) * 0.165;
-        float islandArchipelago = exp(-pow(dSanc / 0.036, 2.0)) * 0.085;
-        // Sunny landing lagoon & coastal archipelago strait visible at +3.6 (3.98 km) aerial altitude
-        float lagoonCut = exp(-pow(length((p - normalize(uSanctuaryDir)) * vec3(1.0, 1.4, 1.0) - vec3(0.011, 0.0, -0.008)) / 0.0075, 2.0)) * 0.065;
-        float sanctuarySeaRing = smoothstep(0.00028, 0.00095, dSanc) * (1.0 - smoothstep(0.0022, 0.0046, dSanc));
-
-        float microTerrain = 0.0;
-        if (detailWeight > 0.01) {
-          float mesoRidge = (ridgedFbm4(p * 38.0 + warp * 0.6) - 0.35) * 0.075;
-          float coastalFbm = (fbm4(p * 145.0) - 0.48) * 0.045;
-          float fineGeo = (fbm4(p * 620.0) - 0.48) * 0.040;
-          microTerrain = (mesoRidge + coastalFbm + fineGeo) * detailWeight;
-          ridges = mix(ridges, clamp(ridges * 0.65 + ridgedFbm4(p * 42.0) * 0.55, 0.0, 1.0), detailWeight * 0.72);
-          detail = mix(detail, clamp(detail * 0.55 + fbm4(p * 165.0) * 0.55, 0.0, 1.0), detailWeight * 0.75);
-        }
-
-        // Flatten immediate Sanctuary meadow bowl and carve sunlit island moat ring for clear +3.6 aerial silhouettes
-        float landingBowl = smoothstep(0.00032, 0.0024, dSanc);
-        microTerrain *= mix(0.28, 1.0, landingBowl);
-        float moatCarve = sanctuarySeaRing * (0.28 + 0.12 * smoothstep(0.35, 0.75, detail)) * detailWeight;
-
-        ridgesOut = ridges;
-        detailOut = detail;
-        return cont + continentPedestal + islandArchipelago - lagoonCut - moatCarve + microTerrain;
-      }
-
       void main() {
         vec3 p = normalize(vObjPos);
         float detailWeight = clamp(uDetailScale, 0.0, 1.0);
-        float ridges = 0.0;
-        float detail = 0.0;
-        float cont = evalTerrainHeight(p, detailWeight, ridges, detail);
+
+        vec3 warp = vec3(
+          noise3D(p * 2.2 + vec3(1.7)) - 0.5,
+          noise3D(p * 2.2 + vec3(8.3)) - 0.5,
+          noise3D(p * 2.2 + vec3(4.9)) - 0.5
+        );
+        float cont = fbm3(p * 2.75 + warp * 0.95);
+        float ridges = ridgedFbm3(p * 10.5 + warp * 1.3);
+        float detail = fbm3(p * 24.0);
+
+        // Anchor the primary Sanctuary continent & archipelago smoothly around uSanctuaryDir (22.5N, 42.0E)
+        vec3 sDir = normalize(uSanctuaryDir);
+        vec3 relP = p - sDir;
+        float dSanc = length(relP);
+        float continentPedestal = exp(-pow(dSanc / 0.24, 2.0)) * 0.165;
+        float islandArchipelago = exp(-pow(dSanc / 0.042, 2.0)) * 0.075;
+
+        // Multi-scale organic FBM terrain & fjord coastlines (zero radial bullseye rings!)
+        if (detailWeight > 0.01) {
+          float regionalMtn = ridgedFbm3(p * 52.0 + warp * 0.6);
+          float coastalFbm = fbm3(p * 210.0) - 0.48;
+          float fjordCut = (fbm3(p * 680.0 + vec3(regionalMtn * 0.8)) - 0.52) * 0.14;
+          float microDetail = (noise3D(p * 1850.0) - 0.5) * 0.055;
+          cont += (coastalFbm * 0.12 + fjordCut + microDetail + (regionalMtn - 0.32) * 0.085) * detailWeight;
+          ridges = mix(ridges, clamp(ridges * 0.48 + regionalMtn * 0.65, 0.0, 1.0), detailWeight * 0.78);
+          detail = mix(detail, clamp(detail * 0.45 + (coastalFbm + 0.5) * 0.65, 0.0, 1.0), detailWeight * 0.82);
+        }
+        cont += continentPedestal + islandArchipelago;
 
         float seaLevel = 0.505;
-        float coastFeather = mix(0.012, 0.0035, detailWeight);
+        float coastFeather = mix(0.012, 0.0032, detailWeight);
         float isLand = smoothstep(seaLevel - coastFeather * 0.7, seaLevel + coastFeather, cont);
         float elev = clamp((cont - seaLevel) / (1.0 - seaLevel), 0.0, 1.0);
-        float mountain = pow(ridges, 2.1) * smoothstep(0.04, 0.38, elev);
+        float mountain = pow(ridges, 1.85) * smoothstep(0.04, 0.36, elev);
 
-        // Perturb surface normal along adaptive tangent resolution for crisp orbital & atmospheric cordillera relief
-        float eps = mix(0.008, 0.0008, detailWeight);
-        float rDummy = 0.0;
-        float dDummy = 0.0;
-        float hC = cont;
-        float hX = evalTerrainHeight(normalize(p + vec3(eps, 0.0, 0.0)), detailWeight, rDummy, dDummy);
-        float hY = evalTerrainHeight(normalize(p + vec3(0.0, eps, 0.0)), detailWeight, rDummy, dDummy);
-        vec3 gradLocal = vec3(hC - hX, hC - hY, 0.0) / max(eps * 60.0, 0.04);
-        vec3 N = normalize(vWorldNormal + clamp(gradLocal, -0.45, 0.45) * isLand * mix(0.85, 1.35, detailWeight));
+        // Single-pass hardware derivatives compute crisp terrain normal shading with ZERO extra FBM passes!
+        float reliefVal = cont + mountain * 0.35;
+        vec3 dPosX = dFdx(vWorldPos);
+        vec3 dPosY = dFdy(vWorldPos);
+        vec3 gradSurf = vec3(dFdx(reliefVal), dFdy(reliefVal), 0.0);
+        float bumpStrength = mix(14.0, 38.0, detailWeight) * isLand;
+        vec3 baseN = normalize(vWorldNormal);
+        vec3 tangPerturb = normalize(dPosX + vec3(1e-6)) * (-gradSurf.x * bumpStrength)
+                         + normalize(dPosY + vec3(1e-6)) * (-gradSurf.y * bumpStrength);
+        vec3 N = normalize(baseN + clamp(tangPerturb, -0.55, 0.55));
         vec3 L = normalize(uSunDir);
         vec3 V = normalize(cameraPosition - vWorldPos);
 
         float lat = abs(p.y);
         float polarIce = smoothstep(0.76 - detail * 0.08, 0.86, lat + mountain * 0.18);
 
-        // Bathymetric ocean colors
+        // Bathymetric ocean colors (deep sapphire ocean -> turquoise coral reefs)
         float shelf = smoothstep(seaLevel - 0.085, seaLevel, cont);
-        vec3 abyssalOcean = vec3(0.014, 0.052, 0.145);
-        vec3 shallowReef  = vec3(0.04, 0.32, 0.45);
-        vec3 beachSand    = vec3(0.76, 0.69, 0.52);
-        vec3 oceanAlbedo  = mix(abyssalOcean, shallowReef, pow(shelf, 2.2));
+        vec3 abyssalOcean = vec3(0.012, 0.055, 0.16);
+        vec3 shallowReef  = vec3(0.04, 0.38, 0.52);
+        vec3 beachSand    = vec3(0.76, 0.70, 0.54);
+        vec3 oceanAlbedo  = mix(abyssalOcean, shallowReef, pow(shelf, 2.0));
 
-        // Realistic biomes by latitude & elevation
-        float dSanc = length(p - normalize(uSanctuaryDir));
-        float aridity = smoothstep(0.16, 0.38, lat) * (1.0 - smoothstep(0.38, 0.62, lat)) * smoothstep(0.38, 0.68, detail);
-        // Keep Sanctuary landing region emerald-lush even near subtropical belt
-        aridity *= smoothstep(0.02, 0.14, dSanc);
+        // Lush Sanctuary rainforest + alpine granite peaks + high-elevation snowcaps
+        float aridity = smoothstep(0.18, 0.40, lat) * (1.0 - smoothstep(0.40, 0.64, lat)) * smoothstep(0.42, 0.72, detail);
+        aridity *= smoothstep(0.03, 0.16, dSanc);
 
-        vec3 lushForest  = vec3(0.055, 0.215, 0.072);
-        vec3 savanna     = vec3(0.34, 0.31, 0.15);
+        vec3 lushForest  = vec3(0.048, 0.255, 0.082);
+        vec3 brightCanopy = vec3(0.095, 0.34, 0.115);
         vec3 desertSand  = vec3(0.62, 0.50, 0.34);
-        vec3 alpineRock  = vec3(0.28, 0.26, 0.25);
-        vec3 snowCap     = vec3(0.92, 0.95, 0.98);
+        vec3 alpineRock  = vec3(0.28, 0.29, 0.31);
+        vec3 snowCap     = vec3(0.92, 0.96, 1.0);
 
-        vec3 landAlbedo = mix(lushForest, savanna, smoothstep(0.35, 0.68, detail));
-        landAlbedo = mix(landAlbedo, desertSand, aridity * 0.82);
-        landAlbedo = mix(landAlbedo, alpineRock, smoothstep(0.22, 0.56, mountain + elev * 0.45));
-        landAlbedo = mix(landAlbedo, snowCap, smoothstep(0.56, 0.80, mountain + elev * 0.35));
+        vec3 landAlbedo = mix(lushForest, brightCanopy, smoothstep(0.32, 0.74, detail));
+        landAlbedo = mix(landAlbedo, desertSand, aridity * 0.78);
+        landAlbedo = mix(landAlbedo, alpineRock, smoothstep(0.24, 0.54, mountain + elev * 0.42));
+        landAlbedo = mix(landAlbedo, snowCap, smoothstep(0.55, 0.78, mountain + elev * 0.32));
 
-        // Warm golden coastal beaches resolve smoothly as camera descends
-        float beachMask = (1.0 - smoothstep(0.0, 0.045, elev)) * isLand * detailWeight;
-        landAlbedo = mix(landAlbedo, beachSand, beachMask * 0.72);
+        // Slim sandy coral shoreline strictly along coast threshold
+        float beachMask = (1.0 - smoothstep(0.0, 0.015, elev)) * isLand * detailWeight;
+        landAlbedo = mix(landAlbedo, beachSand, beachMask * 0.65);
 
         vec3 albedo = mix(oceanAlbedo, landAlbedo, isLand);
         albedo = mix(albedo, snowCap, polarIce);
@@ -981,13 +998,12 @@ export function createHabitablePlanetMaterial(
         float spec = pow(max(0.0, dot(N, H)), 96.0) * (1.0 - isLand) * (1.0 - polarIce) * dayFactor;
         vec3 glint = vec3(1.0, 0.90, 0.72) * spec * (0.65 + 0.85 * fresnel);
 
-        // Subtle warm golden Capybara Sanctuary coastal lights on night side
         float nightMask = smoothstep(0.02, -0.18, ndl) * isLand * (1.0 - polarIce);
         float coastal = (1.0 - smoothstep(0.0, 0.16, elev));
         float cityClusters = pow(smoothstep(0.60, 0.82, detail), 2.5) * coastal;
         vec3 nightLights = vec3(1.0, 0.72, 0.32) * cityClusters * nightMask * 0.55;
 
-        vec3 ambientNight = albedo * mix(0.022, 0.09, detailWeight);
+        vec3 ambientNight = albedo * mix(0.025, 0.10, detailWeight);
         vec3 sunsetTint = vec3(0.92, 0.36, 0.14) * twilight * albedo * 1.4;
         vec3 lit = albedo * (diffuse * 1.35) + sunsetTint + glint + nightLights + ambientNight;
 
@@ -1050,12 +1066,12 @@ export function createPlanetCloudMaterial(
         vec3 p = dir * 3.4 + vec3(uTime * 0.008, 0.0, -uTime * 0.006);
         // Coriolis zonal trade-wind swirl
         p.x += sin(dir.y * 7.0) * 0.45;
-        vec3 warp = vec3(fbm4(p * 1.3), fbm4(p * 1.3 + vec3(5.2)), fbm4(p * 1.3 + vec3(9.1)));
-        float n = fbm5(p * 1.85 + (warp - 0.5) * 1.6);
+        vec3 warp = vec3(fbm3(p * 1.3), fbm3(p * 1.3 + vec3(5.2)), fbm3(p * 1.3 + vec3(9.1)));
+        float n = fbm3(p * 1.85 + (warp - 0.5) * 1.6);
 
         if (uDetailScale > 0.02) {
-          float fineCumulus = fbm4(dir * 48.0 + vec3(uTime * 0.02, 0.0, -uTime * 0.015));
-          n = mix(n, clamp(n * 0.65 + fineCumulus * 0.48, 0.0, 1.0), clamp(uDetailScale, 0.0, 1.0) * 0.72);
+          float fineCumulus = noise3D(dir * 48.0 + vec3(uTime * 0.02, 0.0, -uTime * 0.015));
+          n = mix(n, clamp(n * 0.65 + fineCumulus * 0.48, 0.0, 1.0), clamp(uDetailScale, 0.0, 1.0) * 0.65);
         }
 
         // Smoothly open a sunlit atmospheric descent window over Sanctuary Archipelago when entering troposphere
@@ -1432,12 +1448,12 @@ export function createMultiverseBubbleMaterial(opts: {
       void main() {
         vec3 N = normalize(vNormal);
         vec3 V = normalize(vViewDir);
-        float NdotV = max(0.0, dot(N, V));
+        float NdotV = abs(dot(N, V));
         float fresnel = pow(1.0 - NdotV, 2.4);
 
         // Thin-film interference thickness modulated by quantum vacuum ripples
         vec3 p = vWorldPos * 0.12 + vec3(uTime * 0.02, -uTime * 0.015, uTime * 0.01);
-        float noise = fbm4(p * 2.2);
+        float noise = fbm3(p * 2.2);
         float filmThickness = noise * 1.8 + fresnel * 1.2;
 
         // Chromatic interference color cycle

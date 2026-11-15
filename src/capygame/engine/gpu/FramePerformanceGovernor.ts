@@ -489,8 +489,8 @@ export function computeSolarPlanetFocusOffset(
   planetOrbitTheta: number,
   eclipticTiltX: number = 0.34
 ): SolarPlanetFocusResult {
-  // 0 at outer heliosphere/Oort (>= 13.8), ramping smoothly to 1.0 as camera passes Neptune -> Earth (<= 11.0)
-  const focusBlend = smoothstepRange(13.8, 11.0, logScaleMeters);
+  // 0 at outer interstellar/Oort (>= 16.2), ramping smoothly to ~0.98+ onto CapyWorld Planet across Stellar Systems (12.5 -> 12.2)
+  const focusBlend = smoothstepRange(16.2, 12.2, logScaleMeters);
   const px = Math.cos(planetOrbitTheta) * planetOrbitRadius;
   const pz = -Math.sin(planetOrbitTheta) * planetOrbitRadius;
 
@@ -554,7 +554,9 @@ export function computeSpiralGalaxyFocusOffset(
   armRadius: number = HOME_GALAXY_ARM_RADIUS,
   armTheta: number = HOME_GALAXY_ARM_THETA
 ): SpiralGalaxyFocusResult {
-  const blend = smoothstepRange(20.95, 19.4, logScaleMeters);
+  // Aim early into CapySol's Orion-Cygnus Spur starting from Cluster/outer Galaxy approach (24.0 -> 21.2)
+  // so by Galaxy (21.0) we are 100% aimed at CapySol rather than dead-center into the galactic core.
+  const blend = smoothstepRange(24.0, 21.2, logScaleMeters);
   const armX = Math.cos(armTheta) * armRadius;
   const armZ = -Math.sin(armTheta) * armRadius;
 

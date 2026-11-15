@@ -107,6 +107,7 @@ import {
   Trash2,
   Sun,
   Moon,
+  Shuffle,
 } from 'lucide-react';
 
 type DockTab = 'modes' | 'build' | 'dna' | 'upgrades' | 'wardrobe';
@@ -583,6 +584,8 @@ export const CapyGameView: React.FC = () => {
     fineStructureInverse: CODATA_FINE_STRUCTURE_INVERSE,
     fineStructureAlpha: 1 / CODATA_FINE_STRUCTURE_INVERSE,
     galaxyMorphology: 'spiral',
+    forestSpecimenId: 'leaf',
+    forestSpecimenLabel: 'Leaf',
   }));
 
   // Mobile Touch Virtual Joystick visual state
@@ -2367,13 +2370,17 @@ export const CapyGameView: React.FC = () => {
                   {universeScale.scientificLabel}
                 </span>
                 <span className="hidden sm:inline text-zinc-600 text-[10px]">·</span>
-                <span className="hidden sm:inline text-[11px] font-medium text-zinc-200 max-w-[116px] lg:max-w-[155px] truncate">
-                  {UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || 'Scale'}
+                <span className="hidden sm:inline text-[11px] font-medium text-zinc-200 max-w-[140px] lg:max-w-[185px] truncate">
+                  {universeScale.bandId === 'leaf_fur_micro' && universeScale.forestSpecimenLabel
+                    ? `Leaf & Fur · ${universeScale.forestSpecimenLabel}`
+                    : UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || 'Scale'}
                 </span>
               </>
             ) : (
-              <span className="text-[11px] font-medium text-zinc-100 max-w-[96px] sm:max-w-[150px] truncate">
-                {UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || 'Zoom'}
+              <span className="text-[11px] font-medium text-zinc-100 max-w-[125px] sm:max-w-[180px] truncate">
+                {universeScale.bandId === 'leaf_fur_micro' && universeScale.forestSpecimenLabel
+                  ? `Leaf & Fur · ${universeScale.forestSpecimenLabel}`
+                  : UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || 'Zoom'}
               </span>
             )}
             <ChevronDown
@@ -2530,7 +2537,9 @@ export const CapyGameView: React.FC = () => {
                   ) : (
                     <span className="font-medium text-zinc-100 truncate">
                       {universeScale.active
-                        ? UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || 'Space'
+                        ? universeScale.bandId === 'leaf_fur_micro' && universeScale.forestSpecimenLabel
+                          ? `Glade · ${universeScale.forestSpecimenLabel}`
+                          : UNIVERSE_SCALE_BANDS[universeScale.bandIndex]?.shortLabel || 'Space'
                         : cosmicStage === 'singularity'
                           ? 'Play'
                           : infographicTargetTitle}
@@ -2585,7 +2594,11 @@ export const CapyGameView: React.FC = () => {
                     </span>
                     <span className="text-zinc-600">·</span>
                     <span className="font-sans font-medium text-zinc-100 truncate">
-                      {universeScale.active ? universeScale.bandTitle : infographicTargetTitle}
+                      {universeScale.active
+                        ? universeScale.bandId === 'leaf_fur_micro' && universeScale.forestSpecimenLabel
+                          ? `Leaf & Fur · ${universeScale.forestSpecimenLabel}`
+                          : universeScale.bandTitle
+                        : infographicTargetTitle}
                     </span>
                   </span>
                 )}
@@ -7509,7 +7522,7 @@ export const CapyGameView: React.FC = () => {
           }`}
         >
           {!isAdvancedMode ? (
-            <div className="flex items-center justify-center gap-1.5">
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
               <button
                 type="button"
                 onClick={() => managerRef.current?.stepScaleBand(1)}
@@ -7526,6 +7539,21 @@ export const CapyGameView: React.FC = () => {
               >
                 Play on Island!
               </button>
+              {universeScale.bandId === 'leaf_fur_micro' && (
+                <button
+                  type="button"
+                  data-testid="shuffle-forest-specimen-btn"
+                  onClick={() => {
+                    AudioService.playCoin();
+                    managerRef.current?.rerollForestSpecimen();
+                  }}
+                  title="Pick a random Forest Glade specimen"
+                  className="px-2.5 py-1.5 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 text-amber-200 border border-amber-400/45 text-xs font-medium cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                >
+                  <Shuffle className="w-3 h-3 shrink-0" />
+                  <span>{universeScale.forestSpecimenLabel || 'Specimen'}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => managerRef.current?.stepScaleBand(-1)}
@@ -7556,6 +7584,21 @@ export const CapyGameView: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
+                  {universeScale.bandId === 'leaf_fur_micro' && (
+                    <button
+                      type="button"
+                      data-testid="shuffle-forest-specimen-btn"
+                      onClick={() => {
+                        AudioService.playCoin();
+                        managerRef.current?.rerollForestSpecimen();
+                      }}
+                      title="Randomly switch spotlight among all 11 Forest Glade specimens"
+                      className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/45 text-[10px] font-mono font-semibold cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                    >
+                      <Shuffle className="w-3 h-3 shrink-0" />
+                      <span>{universeScale.forestSpecimenLabel || 'Specimen'}</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     data-testid="chrono-land-pad-btn"
