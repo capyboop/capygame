@@ -430,13 +430,24 @@ export class RealisticWorldEnvironment {
       return mat as unknown as THREE.MeshPhysicalMaterial;
     }
 
+    if (isSoftwareGl) {
+      return new THREE.MeshStandardMaterial({
+        color: 0x0369a1,
+        roughness: 0.08,
+        metalness: 0.05,
+        envMapIntensity: 1.25,
+        normalMap: waterNorms.primary,
+        normalScale: new THREE.Vector2(0.55, 0.55),
+      }) as unknown as THREE.MeshPhysicalMaterial;
+    }
+
     const oceanMat = new THREE.MeshPhysicalMaterial({
       color: 0x0369a1,
       roughness: 0.05,
       metalness: 0.0,
       ior: 1.333,
       reflectivity: 0.9,
-      clearcoat: isSoftwareGl ? 0.0 : 1.0,
+      clearcoat: 1.0,
       clearcoatRoughness: 0.035,
       envMapIntensity: 1.25,
       normalMap: waterNorms.primary,
@@ -455,6 +466,7 @@ export class RealisticWorldEnvironment {
       opacity?: number;
       rippleAmp?: number;
       isWebGpu?: boolean;
+      isSoftwareGl?: boolean;
     }
   ): THREE.MeshPhysicalMaterial {
     const waterNorms = PbrTextureSynthesizer.getWaterNormalMaps();
@@ -471,6 +483,21 @@ export class RealisticWorldEnvironment {
       });
       this.trackedTslWaterMaterials.push(mat);
       return mat as unknown as THREE.MeshPhysicalMaterial;
+    }
+
+    const sw = Boolean(options?.isSoftwareGl);
+    if (sw) {
+      return new THREE.MeshStandardMaterial({
+        color: options?.colorHex ?? 0x0ea5e9,
+        roughness: 0.08,
+        metalness: 0.04,
+        envMapIntensity: 1.2,
+        normalMap: waterNorms.primary,
+        normalScale: new THREE.Vector2(0.52, 0.52),
+        transparent: true,
+        opacity: options?.opacity ?? 0.84,
+        depthWrite: false,
+      }) as unknown as THREE.MeshPhysicalMaterial;
     }
 
     const mat = new THREE.MeshPhysicalMaterial({
@@ -629,6 +656,7 @@ export class RealisticWorldEnvironment {
   public readonly cloudGroup = new THREE.Group();
   public readonly weatherMesh: THREE.InstancedMesh;
   public readonly isWebGpu: boolean;
+  public readonly isSoftwareGl: boolean;
 
   // Lighting rig controlled by Day/Night & Weather
   public readonly sunLight: THREE.DirectionalLight;
@@ -684,6 +712,7 @@ export class RealisticWorldEnvironment {
     this.hemiLight = hemiLight;
     this.sunLight = sunLight;
     this.isWebGpu = isWebGpu;
+    this.isSoftwareGl = isSoftwareGl;
 
     const rendererAny = renderer as unknown as {
       getMaxAnisotropy?: () => number;
@@ -1438,6 +1467,7 @@ export class RealisticWorldEnvironment {
       opacity: 0.84,
       rippleAmp: 0.09,
       isWebGpu: this.isWebGpu,
+      isSoftwareGl: this.isSoftwareGl,
     });
     const waterMesh = new THREE.Mesh(
       RealisticWorldEnvironment.createSubdividedWaterDiscGeometry(basinRadius - 0.18, 36, 12),
@@ -1503,15 +1533,23 @@ export class RealisticWorldEnvironment {
     tapFixtureGroup.add(tapNozzle);
 
     // Flowing 3D Tap Water Column + White Foam Impact Ring
-    const streamMat = new THREE.MeshPhysicalMaterial({
-      color: 0xe0f2fe,
-      roughness: 0.04,
-      metalness: 0.0,
-      ior: 1.333,
-      clearcoat: 1.0,
-      transparent: true,
-      opacity: 0.78,
-    });
+    const streamMat = this.isSoftwareGl
+      ? new THREE.MeshStandardMaterial({
+          color: 0xe0f2fe,
+          roughness: 0.08,
+          metalness: 0.0,
+          transparent: true,
+          opacity: 0.78,
+        })
+      : new THREE.MeshPhysicalMaterial({
+          color: 0xe0f2fe,
+          roughness: 0.04,
+          metalness: 0.0,
+          ior: 1.333,
+          clearcoat: 1.0,
+          transparent: true,
+          opacity: 0.78,
+        });
     const tapStreamMesh = new THREE.Mesh(
       new THREE.CylinderGeometry(0.065, 0.125, 1.68, 12),
       streamMat
@@ -1553,19 +1591,30 @@ export class RealisticWorldEnvironment {
     // Persistent Overflow Wet Puddle & Muddy Mess Group around the outside of the Home Pool
     const messGroup = new THREE.Group();
     messGroup.visible = false;
-    const puddleMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0369a1,
-      roughness: 0.04,
-      metalness: 0.0,
-      ior: 1.333,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.03,
-      transparent: true,
-      opacity: 0.85,
-      polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
-    });
+    const puddleMat = this.isSoftwareGl
+      ? new THREE.MeshStandardMaterial({
+          color: 0x0369a1,
+          roughness: 0.08,
+          metalness: 0.0,
+          transparent: true,
+          opacity: 0.85,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
+        })
+      : new THREE.MeshPhysicalMaterial({
+          color: 0x0369a1,
+          roughness: 0.04,
+          metalness: 0.0,
+          ior: 1.333,
+          clearcoat: 1.0,
+          clearcoatRoughness: 0.03,
+          transparent: true,
+          opacity: 0.85,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
+        });
     const mudMat = new THREE.MeshStandardMaterial({
       color: 0x452c1e,
       roughness: 0.18,

@@ -439,13 +439,17 @@ test('Fine-Structure Constant (alpha) physics solver & pilot/vessel schema valid
 test('Solar System Zoom Focus: locks onto Capy-Earth instead of Sun center (0,0,0) and updates sun direction', () => {
   const orbitR = 22.0 * (1.0 / 30.07);
   const theta = 1.4;
-  // At outer Heliosphere (log 14.0): focusBlend === 0 (sun stays centered for full solar overview)
-  const outer = computeSolarPlanetFocusOffset(14.0, orbitR, theta, 0.34);
+  // At outer interstellar approach (log 16.5): focusBlend === 0 (aims cleanly at CapySol star first)
+  const outer = computeSolarPlanetFocusOffset(16.5, orbitR, theta, 0.34);
   assert.equal(outer.focusBlend, 0);
   assert.equal(outer.eclipticOffsetX, 0);
   assert.equal(outer.eclipticOffsetZ, 0);
 
-  // Zoomed inward toward Capy-Earth (log 9.5 -> 7.11): ecliptic shifts by exact (-px, -pz) so planet sits at (0,0,0)
+  // Already nearly locked onto CapyWorld Planet at Star Systems (log 12.5)
+  const starSys = computeSolarPlanetFocusOffset(12.5, orbitR, theta, 0.34);
+  assert.ok(starSys.focusBlend > 0.90 && starSys.focusBlend <= 1.0);
+
+  // Zoomed inward toward CapyWorld (log 9.5 -> 7.11): ecliptic shifts by exact (-px, -pz) so planet sits at (0,0,0)
   const inner = computeSolarPlanetFocusOffset(9.5, orbitR, theta, 0.34);
   assert.equal(inner.focusBlend, 1);
   const expectedPx = Math.cos(theta) * orbitR;
@@ -485,18 +489,19 @@ test('Planet Surface Landmass Zoom Focus: picks point on surface landmass (22.5Â
 });
 
 test('Spiral Galaxy Spiral Arm Zoom Focus: navigates off-center into Milky Way Earth Orion-Cygnus Spur by Spiral Arms (19.4)', () => {
-  // Galaxy overview (log 22.0 & 21.0): focusBlend === 0 (centered on Sagittarius A*)
-  const outer = computeSpiralGalaxyFocusOffset(22.0);
+  // Outer supercluster/cluster approach (log 24.5): focusBlend === 0
+  const outer = computeSpiralGalaxyFocusOffset(24.5);
   assert.equal(outer.galaxyFocusBlend, 0);
   assert.equal(outer.armOffsetX, 0);
   assert.equal(outer.armOffsetZ, 0);
 
-  const galaxyView = computeSpiralGalaxyFocusOffset(21.0);
-  assert.equal(galaxyView.galaxyFocusBlend, 0);
+  // Already actively steering toward CapySol System during Cluster approach (log 22.6)
+  const clusterTransit = computeSpiralGalaxyFocusOffset(22.6);
+  assert.ok(clusterTransit.galaxyFocusBlend > 0.35 && clusterTransit.galaxyFocusBlend < 0.70);
 
-  // Mid-transit between Galaxy (21.0) and Spiral Arms (19.4): actively steering off-center
-  const midTransit = computeSpiralGalaxyFocusOffset(20.2);
-  assert.ok(midTransit.galaxyFocusBlend > 0.25 && midTransit.galaxyFocusBlend < 0.75);
+  // Fully locked onto CapySol System (Orion-Cygnus Spur) by Galaxy (log 21.0)!
+  const galaxyView = computeSpiralGalaxyFocusOffset(21.0);
+  assert.equal(galaxyView.galaxyFocusBlend, 1);
 
   // Arriving at Spiral Arms (log 19.4): craft has navigated into Earth's ~26,000 ly (~0.495 * 21 = 10.4u) Orion Spur
   const spiralArms = computeSpiralGalaxyFocusOffset(19.4);

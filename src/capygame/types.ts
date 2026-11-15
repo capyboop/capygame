@@ -1,3 +1,6 @@
+import type { ForestMicroSpecimenId } from './engine/forestMicroSpecimens';
+export type { ForestMicroSpecimenId };
+
 export type PlayStyle = 'sanctuary' | 'spore' | 'breakout' | 'runner' | 'fallguys';
 
 export type MutationId = 'flippers' | 'wings' | 'tusks' | 'horn' | 'shell' | 'glow_tail';
@@ -1629,13 +1632,13 @@ export const UNIVERSE_SCALE_BANDS: UniverseScaleBandSpec[] = [
   },
   {
     id: 'leaf_fur_micro',
-    title: 'Citrus Leaf & Capybara Fur',
+    title: 'Forest Micro-Glade (Fur, Leaf & Critters)',
     shortLabel: 'Leaf & Fur',
-    subtitle: 'Vascular leaf venation, stomatal guard pores & keratin fur cuticles',
+    subtitle: 'Sunlit forest clearing with Fur, Butterfly, Flower, Leaf, Wood, Mushroom & microbes',
     logMeters: -2.0,
     typicalSizeLabel: '1.0 cm · 10^-2 m',
     domain: 'microscopic',
-    skyHex: 0x041f14,
+    skyHex: 0x1e4d2b,
     accentHex: 0x84cc16,
   },
   {
@@ -1764,6 +1767,8 @@ export interface UniverseScaleTelemetry {
   fineStructureInverse: number;
   fineStructureAlpha: number;
   galaxyMorphology: GalaxyMorphology;
+  forestSpecimenId?: ForestMicroSpecimenId;
+  forestSpecimenLabel?: string;
 }
 
 export function findNearestScaleBandIndex(logMeters: number): number {

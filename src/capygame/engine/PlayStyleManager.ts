@@ -53,6 +53,7 @@ import {
   COSMIC_GALAXIES,
   CosmicStage,
   DEFAULT_CAPY_SETTINGS,
+  ForestMicroSpecimenId,
   GalaxyMorphology,
   GpuEngineTelemetry,
   GpuPipelineConfig,
@@ -693,7 +694,7 @@ export class PlayStyleManager {
     this.performanceLog.fpsTarget = initialSettings.fpsTarget ?? 60;
     this.performanceLog.maxFpsLimit = initialSettings.maxFpsLimit ?? 60;
 
-    this.isSoftwareGl = webGpuInit
+    this.isSoftwareGl = webGpuInit?.renderer
       ? webGpuInit.probe.isFallbackAdapter
       : (() => {
           try {
@@ -762,7 +763,7 @@ export class PlayStyleManager {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.02;
     const gpuCfg = this.buildGpuConfigFromSettings(this.settings);
-    const shadowsEnabledAtBoot = gpuCfg.shadowQuality !== 'off';
+    const shadowsEnabledAtBoot = gpuCfg.shadowQuality !== 'off' && !this.isSoftwareGl;
     this.renderer.shadowMap.enabled = shadowsEnabledAtBoot;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.domElement.style.touchAction = 'none';
@@ -953,11 +954,13 @@ export class PlayStyleManager {
 
     if (this.isWebGpu) {
       convertLegacyShaderMaterialsToTsl(this.scene);
-    } else if (!this.isSoftwareGl) {
+    } else {
       const glRenderer = this.renderer as THREE.WebGLRenderer;
-      glRenderer.compile(this.chronoVessel.root, this.camera, this.scene);
-      glRenderer.compile(this.heroCapy, this.camera, this.scene);
-      glRenderer.compile(this.seamlessUniverse.celestialBackdropGroup, this.camera, this.scene);
+      if (!this.isSoftwareGl) {
+        glRenderer.compile(this.chronoVessel.root, this.camera, this.scene);
+        glRenderer.compile(this.heroCapy, this.camera, this.scene);
+        glRenderer.compile(this.seamlessUniverse.celestialBackdropGroup, this.camera, this.scene);
+      }
       this.scheduleIdlePipelineWarmup();
     }
 
@@ -989,7 +992,7 @@ export class PlayStyleManager {
   }
 
   private scheduleIdlePipelineWarmup(): void {
-    if (typeof window === 'undefined' || this.isSoftwareGl || this.isWebGpu || this.disposed) {
+    if (typeof window === 'undefined' || this.isWebGpu || this.isSoftwareGl || this.disposed) {
       return;
     }
     const glRenderer = this.renderer as THREE.WebGLRenderer;
@@ -997,20 +1000,47 @@ export class PlayStyleManager {
       return;
     }
 
-    const queue: THREE.Object3D[] = [
-      ...this.seamlessUniverse.rootGroup.children,
-      this.worldBaseGroup,
-      this.sanctuaryGroup,
-      this.vfxEngine.rootGroup,
-      this.sporeGroup,
-      this.breakoutGroup,
-      this.runnerGroup,
-      this.fallGuysGroup,
-    ];
+    // Collect one representative renderable per distinct Material so each idle tick compiles
+    // only 1 unique shader program (~2-15ms) instead of stalling 15s compiling an entire subtree at once.
+    const seenMatIds = new Set<string>();
+    const queue: THREE.Object3D[] = [];
+    const enqueueUniqueFrom = (root: THREE.Object3D | null | undefined) => {
+      if (!root) return;
+      root.traverse((obj) => {
+        const rend = obj as THREE.Mesh;
+        if (!rend.isMesh && !(obj as THREE.Points).isPoints && !(obj as THREE.Line).isLine && !(obj as THREE.Sprite).isSprite) {
+          return;
+        }
+        const mat = rend.material;
+        if (!mat) return;
+        const mats = Array.isArray(mat) ? mat : [mat];
+        let hasNewMat = false;
+        for (let i = 0; i < mats.length; i++) {
+          const m = mats[i];
+          if (m && !seenMatIds.has(m.uuid)) {
+            seenMatIds.add(m.uuid);
+            hasNewMat = true;
+          }
+        }
+        if (hasNewMat) {
+          queue.push(obj);
+        }
+      });
+    };
+
+    enqueueUniqueFrom(this.heroCapy);
+    enqueueUniqueFrom(this.sanctuaryGroup);
+    enqueueUniqueFrom(this.worldBaseGroup);
+    enqueueUniqueFrom(this.vfxEngine.rootGroup);
+    for (let i = 0; i < this.seamlessUniverse.rootGroup.children.length; i++) {
+      enqueueUniqueFrom(this.seamlessUniverse.rootGroup.children[i]);
+    }
+
     let index = 0;
     let timerId: number | null = null;
     let idleId: number | null = null;
     let cancelled = false;
+    const stepDelayMs = this.isSoftwareGl ? 120 : 25;
 
     const win = window as Window & {
       requestIdleCallback?: (
@@ -1037,7 +1067,7 @@ export class PlayStyleManager {
                   .catch(() => undefined)
                   .finally(() => {
                     if (!cancelled && !this.disposed && index < queue.length) {
-                      timerId = window.setTimeout(scheduleNext, 35);
+                      timerId = window.setTimeout(scheduleNext, stepDelayMs);
                     }
                   });
                 return;
@@ -1062,7 +1092,7 @@ export class PlayStyleManager {
                 }
               });
           }
-        }, 65);
+        }, stepDelayMs);
       }
     };
 
@@ -2898,6 +2928,17 @@ export class PlayStyleManager {
     // --- CAPYBARA HOME POOL WITH RUNNING TAP WATER & OVERFLOW SPLASH MESS ---
     this.homePool = this.worldEnv.createHomePool(-8.8, 3.0);
     this.sanctuaryGroup.add(this.homePool.group);
+    if (this.isSoftwareGl) {
+      this.homePool.lanternLight.visible = false;
+      this.homePool.group.remove(this.homePool.lanternLight);
+    } else {
+      const lanternWorldPos = new THREE.Vector3();
+      this.homePool.group.updateMatrixWorld(true);
+      this.homePool.lanternLight.getWorldPosition(lanternWorldPos);
+      this.homePool.group.remove(this.homePool.lanternLight);
+      this.homePool.lanternLight.position.copy(lanternWorldPos);
+      this.scene.add(this.homePool.lanternLight);
+    }
 
     // --- 8 PROCEDURAL EXPONENTIAL FRUIT TREES (Strictly Spaced for Zero Canopy/Root/Pool Clipping!) ---
     // Note: NO loose ground fruits are spawned initially! Fruits ONLY spawn onto the ground
@@ -2922,7 +2963,7 @@ export class PlayStyleManager {
       // 3 Contrasting-Variety Trees (bumping non-matching trees sways canopy without spawning fruits!)
       { tier: 0, x: 8.6, z: 6.8, matchesHead: false, altOffset: 1 },
       { tier: 1, x: -19.5, z: -2.4, matchesHead: false, altOffset: 2 },
-      { tier: 2, x: -2.2, z: 15.6, matchesHead: false, altOffset: 3 },
+      { tier: 2, x: -14.8, z: 12.6, matchesHead: false, altOffset: 3 },
     ];
 
     this.sanctuaryTrees = [];
@@ -3019,6 +3060,14 @@ export class PlayStyleManager {
     this.chronoPad = createSanctuaryChronoPad(CHRONO_PAD_X, CHRONO_PAD_Z);
     this.chronoPad.group.userData.ignoreCameraFade = true;
     this.sanctuaryGroup.add(this.chronoPad.group);
+    if (this.isSoftwareGl) {
+      this.chronoPad.beaconLight.visible = false;
+      this.chronoPad.group.remove(this.chronoPad.beaconLight);
+    } else {
+      this.chronoPad.group.remove(this.chronoPad.beaconLight);
+      this.chronoPad.beaconLight.position.set(CHRONO_PAD_X, 0.85, CHRONO_PAD_Z);
+      this.scene.add(this.chronoPad.beaconLight);
+    }
 
     // Instanced textured river pebbles & meadow wildflowers placed strictly outside Pool, Trees, Portals & Chrono-Pad
     const pebbleGeo = new THREE.DodecahedronGeometry(0.22);
@@ -3666,6 +3715,7 @@ export class PlayStyleManager {
         opacity: 0.78,
         rippleAmp: 0.11,
         isWebGpu: this.isWebGpu,
+        isSoftwareGl: this.isSoftwareGl,
       }
     );
     this.sporeWaterMesh = new THREE.Mesh(
@@ -5329,6 +5379,7 @@ export class PlayStyleManager {
   }
 
   private prewarmOccluderShaderPrograms() {
+    if (this.isSoftwareGl) return;
     const roots: THREE.Object3D[] = [];
     for (let i = 0; i < this.sanctuaryTrees.length; i++) {
       roots.push(this.sanctuaryTrees[i].rootGroup);
@@ -6032,7 +6083,7 @@ export class PlayStyleManager {
       this.trackSettledBandForThumbnail(activeBandId, dt);
 
       const inForestWindow =
-        this.currentLogScaleMeters >= -0.85 && this.currentLogScaleMeters <= 3.1;
+        this.currentLogScaleMeters >= -0.85 && this.currentLogScaleMeters <= 2.85;
       this.profiler.startPhase('gpu_shadow_cascade');
       this.gpuEngine.updateLightingAndShadowCascade(
         dt,
@@ -6232,9 +6283,9 @@ export class PlayStyleManager {
     }
 
     this.applySurfaceDrawDistanceAndCulling(
-      this.cosmicStage === 'playing' ||
-        this.cosmicStage === 'capy_selection' ||
-        (this.seamlessZoomActive && this.currentLogScaleMeters <= 3.1)
+      this.seamlessZoomActive
+        ? this.currentLogScaleMeters <= 2.75
+        : this.cosmicStage === 'playing' || this.cosmicStage === 'capy_selection'
     );
 
     this.profiler.startPhase('scene_graph_matrices');
@@ -9124,7 +9175,7 @@ export class PlayStyleManager {
       return;
     }
 
-    const inForestWindow = logVal >= -0.85 && logVal <= 3.1;
+    const inForestWindow = logVal >= -0.85 && logVal <= 2.85;
 
     this.cosmicBuilder.setSuspended(true);
     this.cosmicBuilder.rootGroup.visible = false;
@@ -9135,14 +9186,15 @@ export class PlayStyleManager {
     this.sanctuaryGroup.matrixWorldAutoUpdate = inForestWindow;
     this.seamlessUniverse.forestGroveGroup.visible = inForestWindow;
     this.seamlessUniverse.forestGroveGroup.matrixWorldAutoUpdate = inForestWindow;
-    this.sporeGroup.visible = inForestWindow;
-    this.sporeGroup.matrixWorldAutoUpdate = inForestWindow;
-    this.breakoutGroup.visible = inForestWindow;
-    this.breakoutGroup.matrixWorldAutoUpdate = inForestWindow;
-    this.runnerGroup.visible = inForestWindow;
-    this.runnerGroup.matrixWorldAutoUpdate = inForestWindow;
-    this.fallGuysGroup.visible = inForestWindow;
-    this.fallGuysGroup.matrixWorldAutoUpdate = inForestWindow;
+    // Keep non-Sanctuary mini-game districts culled while flying through seamless scales (re-enabled on surface landing)
+    this.sporeGroup.visible = false;
+    this.sporeGroup.matrixWorldAutoUpdate = false;
+    this.breakoutGroup.visible = false;
+    this.breakoutGroup.matrixWorldAutoUpdate = false;
+    this.runnerGroup.visible = false;
+    this.runnerGroup.matrixWorldAutoUpdate = false;
+    this.fallGuysGroup.visible = false;
+    this.fallGuysGroup.matrixWorldAutoUpdate = false;
     this.selectableCapyGroup.visible = false;
     this.selectableCapyGroup.matrixWorldAutoUpdate = false;
     this.heroCapy.visible = inForestWindow;
@@ -9174,6 +9226,8 @@ export class PlayStyleManager {
         this.worldEnv.sunLight.position.set(sunDir.x * 90, sunDir.y * 90, sunDir.z * 90);
       }
       this.worldEnv.moonLight.intensity = 0.0;
+      if (this.homePool) this.homePool.lanternLight.intensity = 0.0;
+      if (this.chronoPad) this.chronoPad.beaconLight.intensity = 0.0;
       this.renderer.toneMappingExposure = this.settings.gpuExposure ?? 1.02;
     }
 
@@ -9224,7 +9278,7 @@ export class PlayStyleManager {
 
     if (inForestWindow) {
       const lowBlend = THREE.MathUtils.smoothstep(logVal, -0.85, -0.22);
-      const highBlend = 1 - THREE.MathUtils.smoothstep(logVal, 1.85, 3.1);
+      const highBlend = 1 - THREE.MathUtils.smoothstep(logVal, 1.85, 2.85);
       const anchorWeight = lowBlend * highBlend;
       _seamlessFocalPos.set(
         this.heroCapy.position.x * anchorWeight,
@@ -9232,7 +9286,7 @@ export class PlayStyleManager {
         (this.heroCapy.position.z + 0.2) * anchorWeight
       );
       if (logVal >= 0.8) {
-        const t = THREE.MathUtils.clamp((logVal - 0.8) / (3.1 - 0.8), 0, 1);
+        const t = THREE.MathUtils.clamp((logVal - 0.8) / (2.85 - 0.8), 0, 1);
         const s = t * t * (3 - 2 * t);
         camRadius = THREE.MathUtils.lerp(7.6, canonicalRadius, s);
       } else if (logVal >= -0.15) {
@@ -9242,7 +9296,7 @@ export class PlayStyleManager {
       } else {
         const t = THREE.MathUtils.clamp((logVal - -0.85) / (-0.15 - -0.85), 0, 1);
         const s = t * t * (3 - 2 * t);
-        camRadius = THREE.MathUtils.lerp(canonicalRadius, 1.25, s);
+        camRadius = THREE.MathUtils.lerp(0.65, 1.25, s);
       }
       const forestFar = computeEffectiveCameraFar(
         this.settings.drawDistance ?? 650,
@@ -9458,6 +9512,12 @@ export class PlayStyleManager {
     return this.seamlessUniverse.getGalaxyMorphology();
   }
 
+  public rerollForestSpecimen(specificId?: ForestMicroSpecimenId): void {
+    this.seamlessUniverse.rerollForestSpecimen(specificId);
+    this.invalidateZoomThumbnails('leaf_fur_micro');
+    this.callbacks.onUniverseScaleChange?.(this.getUniverseScaleTelemetry());
+  }
+
   public invalidateZoomThumbnails(specificBandId?: UniverseScaleBandId): void {
     if (specificBandId) {
       delete this.thumbBandVersion[specificBandId];
@@ -9598,6 +9658,8 @@ export class PlayStyleManager {
       fineStructureInverse: +(this.proceduralConfig.universe.fineStructureInverse ?? 137.036).toFixed(3),
       fineStructureAlpha: +(1.0 / (this.proceduralConfig.universe.fineStructureInverse ?? 137.036)).toFixed(6),
       galaxyMorphology: this.seamlessUniverse.getGalaxyMorphology(),
+      forestSpecimenId: this.seamlessUniverse.getActiveForestSpecimenSpec().id,
+      forestSpecimenLabel: this.seamlessUniverse.getActiveForestSpecimenSpec().label,
     };
   }
 
@@ -9630,7 +9692,7 @@ export class PlayStyleManager {
       this.tickSeamlessUniverse(0.016);
       if (this.worldEnv && this.gpuEngine) {
         const inForestWindow =
-          this.currentLogScaleMeters >= -0.85 && this.currentLogScaleMeters <= 3.1;
+          this.currentLogScaleMeters >= -0.85 && this.currentLogScaleMeters <= 2.85;
         this.gpuEngine.updateLightingAndShadowCascade(
           0.016,
           this.heroCapy.position.x,
@@ -9654,6 +9716,10 @@ export class PlayStyleManager {
 
   public jumpToScaleBand(bandId: UniverseScaleBandId, immediate: boolean = false) {
     const spec = this.seamlessUniverse.getBandById(bandId);
+    if (bandId === 'leaf_fur_micro' && !immediate) {
+      this.seamlessUniverse.rerollForestSpecimen();
+      this.invalidateZoomThumbnails('leaf_fur_micro');
+    }
     if (bandId === 'single_electron') {
       this.quantumFocusMode = 'electron';
     } else if (bandId === 'single_photon') {
@@ -9744,7 +9810,7 @@ export class PlayStyleManager {
 
     if (this.seamlessZoomActive) {
       const logVal = this.currentLogScaleMeters;
-      const inForestWindow = logVal >= -0.85 && logVal <= 3.1;
+      const inForestWindow = logVal >= -0.85 && logVal <= 2.85;
       const horizonMinPitch = inForestWindow
         ? 0.14
         : THREE.MathUtils.lerp(-0.68, 0.14, THREE.MathUtils.smoothstep(logVal, 5.8, 4.7));

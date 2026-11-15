@@ -1904,19 +1904,30 @@ export class CapyModelGenerator {
     }
 
     const waterNorms = PbrTextureSynthesizer.getWaterNormalMaps();
+    const waterMat = this.leanTextureMode
+      ? new THREE.MeshStandardMaterial({
+          color: 0x0ea5e9,
+          roughness: 0.14,
+          metalness: 0.12,
+          normalMap: waterNorms.primary,
+          normalScale: new THREE.Vector2(0.45, 0.45),
+          transparent: true,
+          opacity: 0.86,
+        })
+      : new THREE.MeshPhysicalMaterial({
+          color: 0x0ea5e9,
+          roughness: 0.08,
+          clearcoat: 1.0,
+          normalMap: waterNorms.primary,
+          normalScale: new THREE.Vector2(0.45, 0.45),
+          clearcoatNormalMap: waterNorms.secondary,
+          clearcoatNormalScale: new THREE.Vector2(0.3, 0.3),
+          transparent: true,
+          opacity: 0.86,
+        });
     const water = new THREE.Mesh(
       new THREE.CylinderGeometry(radius - 0.2, radius - 0.2, 0.22, 24),
-      new THREE.MeshPhysicalMaterial({
-        color: 0x0ea5e9,
-        roughness: 0.08,
-        clearcoat: 1.0,
-        normalMap: waterNorms.primary,
-        normalScale: new THREE.Vector2(0.45, 0.45),
-        clearcoatNormalMap: waterNorms.secondary,
-        clearcoatNormalScale: new THREE.Vector2(0.3, 0.3),
-        transparent: true,
-        opacity: 0.86,
-      })
+      waterMat
     );
     water.position.set(0, 0.16, 0);
     water.userData.ignoreCameraFade = true;

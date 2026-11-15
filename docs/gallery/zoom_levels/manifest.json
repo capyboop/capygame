@@ -1,0 +1,245 @@
+[
+  {
+    "index": 1,
+    "bandId": "multiverse",
+    "filename": "zoom_01_multiverse_10e_pos30m.png",
+    "scientificLabel": "10^+30.0 m",
+    "scaleFormatted": "105700 Gly",
+    "bandTitle": "Multiverse & Pocket Bubble Universes",
+    "bandSubtitle": "Higher-dimensional false vacuum void spawning nucleating inflationary universe bubbles"
+  },
+  {
+    "index": 2,
+    "bandId": "big_bang",
+    "filename": "zoom_02_big_bang_10e_pos28m.png",
+    "scientificLabel": "10^+28.0 m",
+    "scaleFormatted": "1057 Gly",
+    "bandTitle": "Big Bang & Cosmic Inflation Singularity",
+    "bandSubtitle": "Primordial singularity expanding via exponential cosmic inflation and relativistic plasma"
+  },
+  {
+    "index": 3,
+    "bandId": "universe",
+    "filename": "zoom_03_universe_10e_pos27.2m.png",
+    "scientificLabel": "10^+27.2 m",
+    "scaleFormatted": "168 Gly",
+    "bandTitle": "Entire Evolved Universe",
+    "bandSubtitle": "Total flat spacetime manifold evolved from the Big Bang beyond the visible horizon"
+  },
+  {
+    "index": 4,
+    "bandId": "observable",
+    "filename": "zoom_04_observable_10e_pos26.94m.png",
+    "scientificLabel": "10^+26.9 m",
+    "scaleFormatted": "92 Gly",
+    "bandTitle": "Observable Universe (CMB Horizon)",
+    "bandSubtitle": "93.0 billion light-year particle horizon bounded by the 2.725 K Cosmic Microwave Background sphere"
+  },
+  {
+    "index": 5,
+    "bandId": "cosmic_web",
+    "filename": "zoom_05_cosmic_web_10e_pos25.2m.png",
+    "scientificLabel": "10^+25.2 m",
+    "scaleFormatted": "1.68 Gly",
+    "bandTitle": "Cosmic Web & Intergalactic Voids",
+    "bandSubtitle": "Large-scale gravitational structure of dark matter halos, gas sheets, and 100 Mly cosmic voids"
+  },
+  {
+    "index": 6,
+    "bandId": "filament",
+    "filename": "zoom_06_filament_10e_pos24m.png",
+    "scientificLabel": "10^+24.0 m",
+    "scaleFormatted": "106 Mly",
+    "bandTitle": "Cosmic Filament Wall",
+    "bandSubtitle": "Gravitational dark matter and baryon bridge linking galaxy superclusters across intergalactic space"
+  },
+  {
+    "index": 7,
+    "bandId": "supercluster",
+    "filename": "zoom_07_supercluster_10e_pos23m.png",
+    "scientificLabel": "10^+23.0 m",
+    "scaleFormatted": "11 Mly",
+    "bandTitle": "Supercluster (Laniakea & Great Attractor)",
+    "bandSubtitle": "Gravitational basin of 100,000 galaxies streaming along cosmic streamlines toward the Great Attractor"
+  },
+  {
+    "index": 8,
+    "bandId": "cluster",
+    "filename": "zoom_08_cluster_10e_pos22.2m.png",
+    "scientificLabel": "10^+22.2 m",
+    "scaleFormatted": "1.7 Mly",
+    "bandTitle": "Galaxy Cluster (Virgo / Coma Swarm)",
+    "bandSubtitle": "Gravitationally bound swarm of thousands of galaxies immersed in hot X-ray intracluster plasma"
+  },
+  {
+    "index": 9,
+    "bandId": "galaxy",
+    "filename": "zoom_09_galaxy_10e_pos21m.png",
+    "scientificLabel": "10^+21.0 m",
+    "scaleFormatted": "105700 ly",
+    "bandTitle": "Milky Way Galaxy & Spiral Arms",
+    "bandSubtitle": "105,700 ly stellar disc, central bulge, Sagittarius A* SMBH & continuous spiral arms"
+  },
+  {
+    "index": 10,
+    "bandId": "spiral_arms",
+    "filename": "zoom_10_spiral_arms_10e_pos19.4m.png",
+    "scientificLabel": "10^+19.4 m",
+    "scaleFormatted": "2655 ly",
+    "bandTitle": "Spiral Arms (Orion-Cygnus Spur · 26,000 ly)",
+    "bandSubtitle": "Solar neighborhood inside the Milky Way Orion-Cygnus Spur, ~50% radius from core, OB supergiants & dust rifts"
+  },
+  {
+    "index": 11,
+    "bandId": "nebulas",
+    "filename": "zoom_11_nebulas_10e_pos17.2m.png",
+    "scientificLabel": "10^+17.2 m",
+    "scaleFormatted": "16.75 ly",
+    "bandTitle": "Nebulas, Molecular Clouds & Dust Pillars",
+    "bandSubtitle": "Ionized H-II gas clouds, dark absorptive Bok globules, M16 pillars of creation, and Herbig-Haro shock jets"
+  },
+  {
+    "index": 12,
+    "bandId": "stellar_systems",
+    "filename": "zoom_12_stellar_systems_10e_pos12.95m.png",
+    "scientificLabel": "10^+12.9 m",
+    "scaleFormatted": "59.6 AU",
+    "bandTitle": "Stellar & Planetary Systems (Solar System)",
+    "bandSubtitle": "0.005–50,000 AU · Central Star, Terrestrial Planets, Asteroids, Jovian Giants, Kuiper Belt & Oort Cloud"
+  },
+  {
+    "index": 13,
+    "bandId": "planetary_system",
+    "filename": "zoom_13_planetary_system_10e_pos8.85m.png",
+    "scientificLabel": "10^+8.8 m",
+    "scaleFormatted": "708k km",
+    "bandTitle": "Planetary System & Moon Orbits",
+    "bandSubtitle": "Planetary Hill sphere, Capy-Moon orbital ellipse (384,400 km), and ring plane"
+  },
+  {
+    "index": 14,
+    "bandId": "planet",
+    "filename": "zoom_14_planet_10e_pos7.1m.png",
+    "scientificLabel": "10^+7.1 m",
+    "scaleFormatted": "12589 km",
+    "bandTitle": "Planet & Continents (Capy-Earth)",
+    "bandSubtitle": "12,742 km terrestrial sphere, azure oceans, green continents, and polar ice caps"
+  },
+  {
+    "index": 15,
+    "bandId": "atmosphere",
+    "filename": "zoom_15_atmosphere_10e_pos4.9m.png",
+    "scientificLabel": "10^+4.9 m",
+    "scaleFormatted": "79.43 km",
+    "bandTitle": "Atmosphere & Cloud Decks",
+    "bandSubtitle": "80 km Kármán Rayleigh blue limb, jet streams & cumulus cloud towers"
+  },
+  {
+    "index": 16,
+    "bandId": "land_masses",
+    "filename": "zoom_16_land_masses_10e_pos3.6m.png",
+    "scientificLabel": "10^+3.6 m",
+    "scaleFormatted": "3.98 km",
+    "bandTitle": "Land Masses & Cordilleras",
+    "bandSubtitle": "Snow-capped mountain ranges, braided river deltas & island archipelagos"
+  },
+  {
+    "index": 17,
+    "bandId": "ecosystems",
+    "filename": "zoom_17_ecosystems_10e_pos2.2m.png",
+    "scientificLabel": "10^+2.2 m",
+    "scaleFormatted": "158.5 m",
+    "bandTitle": "Forest & Wetland Ecosystems",
+    "bandSubtitle": "Broadleaf & conifer woodland canopy, marshes & sunlit citrus groves"
+  },
+  {
+    "index": 18,
+    "bandId": "capybara_forest",
+    "filename": "zoom_18_capybara_forest_10e_pos0.8m.png",
+    "scientificLabel": "10^+0.8 m",
+    "scaleFormatted": "6.31 m",
+    "bandTitle": "Forest with Capybaras",
+    "bandSubtitle": "Live 3D woodland sanctuary, 1.3m grazing Capybaras, Home Pool & citrus trees"
+  },
+  {
+    "index": 19,
+    "bandId": "leaf_fur_micro",
+    "filename": "zoom_19_leaf_fur_micro_10e_neg2m.png",
+    "scientificLabel": "10^-2.0 m",
+    "scaleFormatted": "1.00 cm",
+    "bandTitle": "Forest Micro-Glade (Fur, Leaf & Critters)",
+    "bandSubtitle": "Sunlit forest clearing with Fur, Butterfly, Flower, Leaf, Wood, Mushroom & microbes"
+  },
+  {
+    "index": 20,
+    "bandId": "biological_cells",
+    "filename": "zoom_20_biological_cells_10e_neg4.3m.png",
+    "scientificLabel": "10^-4.3 m",
+    "scaleFormatted": "50.12 µm",
+    "bandTitle": "Biological Cells & Chloroplasts",
+    "bandSubtitle": "50 µm palisade cellulose walls, 5 µm chloroplasts & chromatin nucleus"
+  },
+  {
+    "index": 21,
+    "bandId": "dna_molecules",
+    "filename": "zoom_21_dna_molecules_10e_neg8.47m.png",
+    "scientificLabel": "10^-8.5 m",
+    "scaleFormatted": "3.39 nm",
+    "bandTitle": "DNA Double Helix & Molecules",
+    "bandSubtitle": "3.4 nm B-DNA helical pitch, 2.0 nm diameter & Watson-Crick base rungs"
+  },
+  {
+    "index": 22,
+    "bandId": "atomic_orbitals",
+    "filename": "zoom_22_atomic_orbitals_10e_neg9.47m.png",
+    "scientificLabel": "10^-9.5 m",
+    "scaleFormatted": "0.34 nm",
+    "bandTitle": "Carbon Atom & Electron Cloud",
+    "bandSubtitle": "3.4 Å van der Waals cloud; C-12 nucleus sits 63,000× smaller at center"
+  },
+  {
+    "index": 23,
+    "bandId": "atomic_nucleus",
+    "filename": "zoom_23_atomic_nucleus_10e_neg14.27m.png",
+    "scientificLabel": "10^-14.3 m",
+    "scaleFormatted": "5.37 fm",
+    "bandTitle": "Atomic Nucleus (Protons & Neutrons)",
+    "bandSubtitle": "5.4 fm Carbon-12 nucleon cluster bound by strong Yukawa pion exchange"
+  },
+  {
+    "index": 24,
+    "bandId": "quarks_gluons",
+    "filename": "zoom_24_quarks_gluons_10e_neg18m.png",
+    "scientificLabel": "10^-18.0 m",
+    "scaleFormatted": "1.00 am",
+    "bandTitle": "Quarks & Gluon Flux Tubes",
+    "bandSubtitle": "Valence u-u-d quark triplet confined by relativistic QCD color flux tubes"
+  },
+  {
+    "index": 25,
+    "bandId": "single_electron",
+    "filename": "zoom_25_single_electron_10e_neg23m.png",
+    "scientificLabel": "10^-23.0 m",
+    "scaleFormatted": "10^-23.0 m",
+    "bandTitle": "Single Electron (Dirac Spinor)",
+    "bandSubtitle": "Spin-1/2 Dirac probability current, magnetic dipole & QED vacuum polarization"
+  },
+  {
+    "index": 26,
+    "bandId": "single_photon",
+    "filename": "zoom_26_single_photon_10e_neg29m.png",
+    "scientificLabel": "10^-29.0 m",
+    "scaleFormatted": "10^-29.0 m",
+    "bandTitle": "Single Photon (EM Wave-Packet)",
+    "bandSubtitle": "Quantized orthogonal E ⊥ B electromagnetic wave-packet propagating at c"
+  },
+  {
+    "index": 27,
+    "bandId": "planck_quantum_foam",
+    "filename": "zoom_27_planck_quantum_foam_10e_neg35m.png",
+    "scientificLabel": "10^-35.0 m",
+    "scaleFormatted": "0.6 l_P",
+    "bandTitle": "Planck Quantum Foam",
+    "bandSubtitle": "Spacetime metric fluctuations at 1.616×10^-35 m bridging to T=0 Big Bang"
+  }
+]
